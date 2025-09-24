@@ -1,0 +1,181 @@
+/* fontes no clima do layout (título/numeração tech + leitura boa) */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;700&display=swap');
+
+:root{
+  /* paleta ciano + âmbar + fundo noite */
+  --cyan:   #00F0FF;
+  --cyan-2: #17d1e6;
+  --amber:  #FFA63B;
+  --amber-2:#ffb764;
+  --panel:  rgba(5, 18, 26, 0.78);
+  --line:   rgba(255,255,255,0.08);
+  --bg:     #05141a;
+}
+
+*{ box-sizing: border-box; }
+
+html, body, #root{
+  height: 100%;
+  margin: 0;
+  color: #E9F7FA;
+  background: var(--bg);
+  font-family: 'Rajdhani', system-ui, sans-serif;
+}
+
+/* TELA com BG embaixo/direita e largura 100% */
+.screen{
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  background: var(--bg) url("/public/bg.png") no-repeat right bottom;
+  background-size: 100% auto;
+}
+
+/* LOGO */
+.header{
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin-top: 35px; /* 👈 ajustado */
+}
+.logo{
+  width: 520px;
+  max-width: 92vw;
+  display: block;
+  filter: drop-shadow(0 0 1px var(--cyan))
+          drop-shadow(0 0 1px var(--cyan))
+          drop-shadow(0 0 8px var(--cyan))
+}
+
+/* GRID */
+.main{
+  width: 100%;
+  max-width: 1400px;
+  margin-top: 50px; /* 👈 ajustado */
+  display: grid;
+  grid-template-columns: minmax(360px, 520px) 1fr;
+  gap: 56px;
+  align-items: start;
+  padding: 0 24px;
+}
+
+/* RANKING — painel neon ciano */
+.ranking{
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  backdrop-filter: blur(6px);
+  padding: 22px 26px;
+  box-shadow: 0 0 0 1px rgba(0,240,255,0.08), 0 12px 28px rgba(0,0,0,0.35);
+}
+.ranking h2{
+  font-family: 'Orbitron', sans-serif;
+  color: var(--cyan);
+  font-size: 34px;
+  letter-spacing: .12em;
+  text-align: center;
+  margin: 0 0 14px;
+  text-shadow: 0 0 14px rgba(0,240,255,.35);
+}
+.ranking ol{ margin: 0; padding: 0; list-style: none; }
+
+.ranking li{
+  display: grid;
+  grid-template-columns: 68px 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px dashed var(--line);
+
+  font-size: 24px;    /* aumentei fonte do conteúdo */
+  line-height: 1.25;
+}
+.ranking li:last-child{ border-bottom: none; }
+
+.pos{
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 900;
+  color: var(--cyan);
+  font-size: 26px;
+  display: flex; align-items: center; justify-content: center;
+  gap: 6px;
+  text-shadow: 0 0 12px rgba(0,240,255,.35);
+}
+.nome{
+  font-weight: 700;
+  color: #eafcff;
+}
+.tempo{
+  font-weight: 900;
+  color: var(--amber);
+  text-shadow: 0 0 10px rgba(255,166,59,.25);
+  letter-spacing: .02em;
+}
+
+/* FRASE — título âmbar/ciano como no mock */
+.frase{
+  justify-self: end;
+  text-align: right;
+  align-self: start;
+  text-shadow: 0 0 10px rgba(0,0,0,0.6);
+  font-family: 'Orbitron', sans-serif;
+
+  font-size: 42px;      /* caber em 2–3 linhas */
+  font-weight: 900;
+  line-height: 1.32;
+  color: var(--amber);
+}
+.frase span{
+  color: var(--cyan);
+  text-shadow: 0 0 16px rgba(0,240,255,.35);
+}
+
+/* BOTÃO — pill neon ciano */
+.cta-bottom{
+  position: fixed;
+  left: 50%;
+  bottom: 75px;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+.btn-start {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 30px;
+    font-weight: 900;
+    padding: 18px 64px;
+    border-radius: 12px;
+    color: var(--cyan);
+    background: rgba(2, 24, 29, 0.85);
+    border: 1px solid var(--cyan);
+    text-shadow: 0 0 4px var(--cyan), 0 0 2px var(--cyan), 0 0 8px var(--cyan);
+    box-shadow: 0 0 8px rgba(0, 240, 255, .25), inset 0 0 4px rgba(0, 240, 255, .15);
+    cursor: pointer;
+    transition: all .2s 
+ease;
+}
+.btn-start:hover{
+  color: var(--amber);
+  text-shadow:
+    0 0 4px var(--amber),
+    0 0 8px var(--amber),
+    0 0 16px var(--amber);
+
+  border-color: var(--amber);
+  box-shadow:
+    0 0 12px rgba(255,166,59,.35),
+    inset 0 0 6px rgba(255,166,59,.2);
+}
+
+/* RESPONSIVO */
+@media (max-width: 1100px){
+  .main{
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+  .frase{
+    text-align: center;
+    justify-self: center;
+  }
+}

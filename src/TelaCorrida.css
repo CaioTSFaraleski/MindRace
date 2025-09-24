@@ -1,0 +1,218 @@
+/* ===== Modal / Popup ===== */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  background: rgba(15,23,42,0.96);
+  color: #e5f4ff;
+  border-radius: 14px;
+  padding: 20px 22px;
+  width: min(520px, 92vw);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.06);
+}
+
+.modal-title {
+  margin: 0 0 10px;
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: .5px;
+}
+
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.modal-row {
+  display: flex;
+  align-items: baseline;
+}
+
+.modal-winner {
+  margin-top: 8px;
+  font-size: 1.1rem;
+}
+
+.modal-reason {
+  margin: 6px 0 0;
+  opacity: .9;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+
+/* Fundo igual ao mock */
+.t2-wrapper {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+  overflow: hidden;
+  color: #dbeafe;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial;
+  background: #0b1012;
+}
+.t2-bg {
+  position: absolute;
+  inset: 0;
+  background: url("/public/bg-tela2.png") center center / cover no-repeat fixed;
+  z-index: 0;
+  background-size: 104% 100%;
+    background-position-x: right;
+}
+.t2-top, .t2-panels, .t2-controls { position: relative; z-index: 1; }
+
+/* Timer topo (laranja) */
+.t2-top {
+  display: flex;
+  justify-content: center;
+  padding-top: clamp(16px, 3vh, 40px);
+}
+/* Timer topo (agora branco) */
+.t2-timer {
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  letter-spacing: 2px;
+  font-size: clamp(36px, 7vw, 72px);
+  color: #ffffff; /* <- trocado de laranja para branco */
+  text-shadow: 0 8px 28px rgba(0,0,0,0.6);
+}
+
+
+/* Painéis centrais (lado a lado) */
+.t2-panels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: clamp(16px, 3vw, 48px);
+  max-width: 1200px;
+  margin: clamp(16px, 6vh, 64px) auto 0 auto;
+  padding: 0 clamp(16px, 3vw, 32px);
+}
+
+/* Painel base */
+.panel {
+  background: rgba(0,0,0,0.18);
+  border-radius: 14px;
+  padding: clamp(16px, 3vw, 28px);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+  min-height: 360px;
+}
+.panel-left  { box-shadow: inset 0 0 0 1px rgba(0, 255, 255, 0.08); }
+.panel-right { box-shadow: inset 0 0 0 1px rgba(255, 196, 0, 0.08); }
+
+/* Títulos */
+.panel-title {
+  margin: 0 0 16px 0;
+  font-weight: 900;
+  letter-spacing: 2px;
+  font-size: clamp(20px, 3.5vw, 36px);
+}
+.panel-title-cyan  { color: #44e4ee; }
+.panel-title-amber { color: #ffd76a; }
+
+/* Métricas */
+.metric { margin-bottom: 18px; }
+.metric-label {
+  font-size: clamp(12px, 2.2vw, 16px);
+  letter-spacing: 2px;
+  opacity: 0.9;
+  margin-bottom: 6px;
+}
+.progress {
+  width: 100%;
+  height: clamp(12px, 2.2vw, 18px);
+  background: rgba(255,255,255,0.1);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  transition: width 200ms ease;
+}
+.progress-cyan   { background: #3ee7f0; } /* concentração polícia */
+.progress-gray   { background: #6b7280; } /* boost polícia (neutro) */
+.progress-amber  { background: #ffcf5a; } /* concentração táxi */
+.progress-green  { background: #2dd46e; } /* boost táxi (verde) */
+
+.metric-value {
+  margin-top: 6px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.metric-cyan  { color: #7ff9ff; }
+.metric-amber { color: #ffe29c; }
+
+/* Linhas "VOLTAS" e "TEMPO FINAL" */
+.kv {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  padding-top: 10px;
+}
+.kv span { letter-spacing: 2px; }
+.kv-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: #c7f9e5;
+}
+
+/* Controles inferiores */
+.t2-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  max-width: 1200px;
+  margin: clamp(20px, 5vh, 60px) auto clamp(10px, 3vh, 24px) auto;
+  padding: 0 clamp(16px, 3vw, 32px);
+}
+.left, .right { display: flex; align-items: center; gap: 10px; }
+
+.btn {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+  font-weight: 700;
+  transition: transform 120ms ease, opacity 120ms ease;
+  backdrop-filter: blur(4px);
+}
+.btn:hover { transform: translateY(-1px); }
+.btn:active { transform: translateY(0); opacity: 0.9; }
+.btn-primary { background: linear-gradient(180deg, #34d399, #10b981); color: #0e1c16; }
+.btn-danger  { background: linear-gradient(180deg, #ff6b6b, #e11d48); }
+.btn-ghost   { background: rgba(255,255,255,0.08); }
+
+.status { opacity: 0.9; }
+.status-desconectado { color: #ffb4b4; }
+.status-conectando   { color: #ffe29c; }
+.status-conectado    { color: #bbf7d0; }
+.status-erro         { color: #ff9aa2; }
+.status-nao-suportado{ color: #ffa94d; }
+
+/* Responsivo */
+@media (max-width: 860px) {
+  .t2-panels { grid-template-columns: 1fr; }
+}

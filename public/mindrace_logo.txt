@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 400">
+  <!-- Símbolo do cérebro com raio -->
+  <g fill="#FF9E2C">
+    <path d="M200 200c-40 0-70-30-70-70s30-70 70-70c25 0 45 12 57 30 8-3 17-5 26-5 40 0 70 30 70 70s-30 70-70 70h-10l20 40-60-40h-33z"/>
+  </g>
+
+  <!-- Texto MINDRACE -->
+  <text x="350" y="230" font-family="Orbitron, sans-serif" font-size="120" font-weight="bold" fill="#00F0FF" letter-spacing="4">
+    MINDRACE
+  </text>
+</svg>
