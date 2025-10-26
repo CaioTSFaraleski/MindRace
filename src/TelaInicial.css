@@ -33,6 +33,22 @@ html, body, #root{
   background-size: 100% auto;
 }
 
+/* Tela 1 – adicionar ao TelaInicial.css (modal do formulário) */
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:50}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:960px;width:92%;padding:22px}
+.modal-title{font-family:'Orbitron',sans-serif;font-size:22px;margin:0 0 12px;color:var(--cyan);text-shadow:0 0 12px rgba(0,240,255,.25)}
+.modal-body.two-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.form-card{border:1px solid var(--line);border-radius:12px;padding:12px;background:rgba(5,18,26,.55)}
+.form-title{font-weight:700;margin-bottom:8px}
+.row{margin-top:8px}
+.row.two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+input[type="text"],input[type="tel"]{width:100%;padding:12px;background:#0e141c;border:1px solid #2a3a4f;border-radius:10px;color:#eafcff}
+.check{display:flex;gap:8px;align-items:center;margin-top:8px}
+.radio-group .radios{display:flex;gap:16px;margin-top:6px}
+.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+.error{color:#ff6b6b;margin-top:8px}
+
+
 /* LOGO */
 .header{
   width: 100%;
