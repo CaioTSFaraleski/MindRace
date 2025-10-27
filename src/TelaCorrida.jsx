@@ -16,7 +16,6 @@ const initialPlayer = (voltasTotal = DEFAULT_TOTAL) => ({
 const loadRanking = () => JSON.parse(localStorage.getItem("ranking.v1") || "[]");
 const saveRanking = (arr) => localStorage.setItem("ranking.v1", JSON.stringify(arr));
 
-/** Ícone Wi-Fi de 3 barras com cores conforme qualidade (0..200). */
 function WifiIcon({ q }) {
   const lvl = Number.isFinite(q) ? Math.max(0, Math.min(200, q)) : 200;
   let bars = 1, color = "#ef4444";
@@ -33,6 +32,15 @@ function WifiIcon({ q }) {
         <g transform="translate(20,0)">{bar(20, bars >= 3)}</g>
       </g>
     </svg>
+  );
+}
+
+function Bar({ value, className }) {
+  const v = Math.max(0, Math.min(100, Number(value) || 0));
+  return (
+    <div className={`progress ${className || ""}`}>
+      <div className="progress-fill" style={{ width: `${v}%` }} />
+    </div>
   );
 }
 
@@ -58,11 +66,15 @@ export default function TelaCorrida({ onBack, corrida }) {
   const [connQual, setConnQual] = useState({ policia: 200, taxi: 200 });
   const connectedOnceRef = useRef({ policia: false, taxi: false });
 
-  // reset ao montar
+  const [relax, setRelax] = useState({ policia: 0, taxi: 0 });
+  const [relaxModal, setRelaxModal] = useState({ policia: false, taxi: false });
+
   useEffect(() => {
     connectedOnceRef.current = { policia: false, taxi: false };
     setConnQual({ policia: 200, taxi: 200 });
     setConn({ policia: "desconectado", taxi: "desconectado" });
+    setRelax({ policia: 0, taxi: 0 });
+    setRelaxModal({ policia: false, taxi: false });
   }, []);
 
   const fmtTop = (ms) => {
@@ -80,7 +92,6 @@ export default function TelaCorrida({ onBack, corrida }) {
   };
   const statusClass = (s) => `status status-${s}`;
 
-  // ===== timer =====
   const startTimer = useCallback(() => {
     if (startedRef.current) return;
     startedRef.current = true;
@@ -99,7 +110,6 @@ export default function TelaCorrida({ onBack, corrida }) {
     setRunning(false);
   }, [running]);
 
-  // ===== conectado quando conexao==0; larga quando ambos =====
   const checkConnectedOnZero = useCallback((lado, conexaoVal) => {
     if (conexaoVal <= 0 && !connectedOnceRef.current[lado]) {
       connectedOnceRef.current[lado] = true;
@@ -112,7 +122,6 @@ export default function TelaCorrida({ onBack, corrida }) {
     }
   }, [connectModalOpen, startTimer]);
 
-  // ===== métricas =====
   const applyPlayer = useCallback(
     (lado, data) => {
       if (data && typeof data.conexao !== "undefined") {
@@ -121,13 +130,28 @@ export default function TelaCorrida({ onBack, corrida }) {
         checkConnectedOnZero(lado, q);
       }
 
+      if (typeof data.relaxamento !== "undefined") {
+        const r = Math.max(0, Math.min(100, Number(data.relaxamento) || 0));
+        setRelax((prev) => ({ ...prev, [lado]: r }));
+        if (r >= 50) setRelaxModal((m) => (m[lado] ? { ...m, [lado]: false } : m));
+      }
+
       const update = (prev) => {
         const total = prev.voltasTotal || DEFAULT_TOTAL;
-        const laps = Math.min(total, Math.max(0, Number(data.voltas) || 0));
+        const lapsRaw = Math.min(total, Math.max(0, Number(data.voltas) || 0));
+        const concNext = Math.max(0, Math.min(100, Number(data.concentracao) || 0));
+        const relaxNow = (lado === "policia" ? (typeof data.relaxamento==="number"?data.relaxamento:relax.policia)
+                                              : (typeof data.relaxamento==="number"?data.relaxamento:relax.taxi));
+        const needRelaxModal = lapsRaw >= 5 && concNext <= 0 && relaxNow < 50;
+        setRelaxModal((m) => ({ ...m, [lado]: needRelaxModal }));
+
+        const blocked = needRelaxModal;
+        const laps = blocked ? Math.min(prev.voltas, lapsRaw) : lapsRaw;
+
         const finishedNow = prev.tempoFinalMs == null && laps >= total && running;
         return {
           ...prev,
-          concentracao: Math.min(100, Math.max(0, Number(data.concentracao) || 0)),
+          concentracao: concNext,
           boost: Math.min(100, Math.max(0, Number(data.boost) || 0)),
           voltas: laps,
           voltasTotal: total,
@@ -137,7 +161,7 @@ export default function TelaCorrida({ onBack, corrida }) {
       if (lado === "policia") setPolicia(update);
       else if (lado === "taxi") setTaxi(update);
     },
-    [running, timerMs, checkConnectedOnZero]
+    [running, timerMs, checkConnectedOnZero, relax]
   );
 
   const parseLine = useCallback(
@@ -153,7 +177,6 @@ export default function TelaCorrida({ onBack, corrida }) {
     [applyPlayer]
   );
 
-  // ===== serial =====
   const connectReaderLoop = useCallback(
     (port, side = null) => {
       const textDecoder = new TextDecoderStream();
@@ -199,7 +222,6 @@ export default function TelaCorrida({ onBack, corrida }) {
     [applyPlayer, parseLine]
   );
 
-  // reabrir portas já concedidas
   useEffect(() => {
     (async () => {
       if (!("serial" in navigator)) {
@@ -233,7 +255,6 @@ export default function TelaCorrida({ onBack, corrida }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // gesto no modal: abrir dois diálogos
   const pairTwoDialogs = async () => {
     if (!("serial" in navigator) || pairingInProgress) return;
     setPairingInProgress(true);
@@ -254,7 +275,6 @@ export default function TelaCorrida({ onBack, corrida }) {
     }
   };
 
-  // safety net: se atingir 10 voltas sem tempo, carimba com timer atual
   useEffect(() => {
     if (!running) return;
     if (policia.voltas >= policia.voltasTotal && policia.tempoFinalMs == null) {
@@ -265,7 +285,6 @@ export default function TelaCorrida({ onBack, corrida }) {
     }
   }, [running, timerMs, policia.voltas, policia.voltasTotal, policia.tempoFinalMs, taxi.voltas, taxi.voltasTotal, taxi.tempoFinalMs]);
 
-  // finalização automática quando ambos têm tempo
   useEffect(() => {
     if (!running) return;
     const pDone = policia.voltas >= policia.voltasTotal && policia.tempoFinalMs != null;
@@ -273,34 +292,26 @@ export default function TelaCorrida({ onBack, corrida }) {
     if (pDone && tDone && !resultModalOpen) {
       stopTimer();
       if (policia.tempoFinalMs < taxi.tempoFinalMs) {
-        setWinner("policia");
-        setWinnerReason("Menor tempo final.");
+        setWinner("policia"); setWinnerReason("Menor tempo final.");
       } else if (taxi.tempoFinalMs < policia.tempoFinalMs) {
-        setWinner("taxi");
-        setWinnerReason("Menor tempo final.");
+        setWinner("taxi"); setWinnerReason("Menor tempo final.");
       } else {
-        setWinner("empate");
-        setWinnerReason("Tempos iguais.");
+        setWinner("empate"); setWinnerReason("Tempos iguais.");
       }
       setResultModalOpen(true);
     }
   }, [running, policia, taxi, resultModalOpen, stopTimer]);
 
-  // finalizar manual
   const finalizeManually = () => {
     stopTimer();
     if (!resultModalOpen) {
-      let w = "empate";
-      let reason = "Mesmas voltas.";
+      let w = "empate"; let reason = "Mesmas voltas.";
       if (policia.voltas > taxi.voltas) { w = "policia"; reason = "Mais voltas."; }
       else if (taxi.voltas > policia.voltas) { w = "taxi"; reason = "Mais voltas."; }
-      setWinner(w);
-      setWinnerReason(reason);
-      setResultModalOpen(true);
+      setWinner(w); setWinnerReason(reason); setResultModalOpen(true);
     }
   };
 
-  // salvar ranking: usa nomes da prop corrida se existirem, senão vazio
   const goBack = () => {
     const arr = loadRanking();
     const saveIf = (lado, tempoMs) => {
@@ -317,7 +328,6 @@ export default function TelaCorrida({ onBack, corrida }) {
     saveIf("policia", policia.tempoFinalMs);
     saveIf("taxi", taxi.tempoFinalMs);
     saveRanking(arr);
-
     if (typeof onBack === "function") onBack();
     else window.location.reload();
   };
@@ -333,58 +343,84 @@ export default function TelaCorrida({ onBack, corrida }) {
       </header>
 
       <main className="t2-panels">
+        {/* PAINEL POLÍCIA */}
         <section className="panel panel-left">
-          <h2 className="panel-title panel-title-cyan">POLÍCIA</h2>
-          <div className="metric">
-            <div className="metric-label">CONCENTRAÇÃO</div>
-            <div className="progress">
-              <div className="progress-fill progress-cyan" style={{ width: `${policia.concentracao}%` }} />
+          <div className={`panel-inner ${relaxModal.policia ? "blurred" : ""}`}>
+            <h2 className="panel-title panel-title-cyan">POLÍCIA</h2>
+            <div className="metric">
+              <div className="metric-label">CONCENTRAÇÃO</div>
+              <Bar value={policia.concentracao} className="progress-cyan" />
+              <div className="metric-value metric-cyan">{policia.concentracao.toFixed(0)}%</div>
             </div>
-            <div className="metric-value metric-cyan">{policia.concentracao.toFixed(0)}%</div>
-          </div>
-          <div className="metric">
-            <div className="metric-label">BOOST</div>
-            <div className="progress">
-              <div className="progress-fill progress-green" style={{ width: `${policia.boost}%` }} />
+            <div className="metric">
+              <div className="metric-label">BOOST</div>
+              <Bar value={policia.boost} className="progress-green" />
+            </div>
+            <div className="kv">
+              <span>VOLTAS</span><span className="kv-value">{policia.voltas}/{policia.voltasTotal}</span>
+            </div>
+            <div className="kv">
+              <span>TEMPO FINAL</span><span className="kv-value">{policia.tempoFinalMs == null ? "-:-" : fmtFinal(policia.tempoFinalMs)}</span>
+            </div>
+            <div className="kv">
+              <span>CONEXÃO</span>
+              <span className="kv-value"><WifiIcon q={connQual.policia} /></span>
             </div>
           </div>
-          <div className="kv">
-            <span>VOLTAS</span><span className="kv-value">{policia.voltas}/{policia.voltasTotal}</span>
-          </div>
-          <div className="kv">
-            <span>TEMPO FINAL</span><span className="kv-value">{policia.tempoFinalMs == null ? "-:-" : fmtFinal(policia.tempoFinalMs)}</span>
-          </div>
-          <div className="kv">
-            <span>CONEXÃO</span>
-            <span className="kv-value"><WifiIcon q={connQual.policia} /></span>
-          </div>
+
+          {relaxModal.policia && (
+            <div className="side-modal">
+              <div className="side-modal-box">
+                <h3 className="modal-title">Polícia — Relaxamento</h3>
+                <p>Concentração zerou. Retoma quando <b>relaxamento ≥ 50%</b>.</p>
+                <div className="metric">
+                  <div className="metric-label">RELAXAMENTO</div>
+                  <Bar value={relax.policia} className="progress-cyan" />
+                  <div className="metric-value metric-cyan">{relax.policia.toFixed(0)}%</div>
+                </div>
+              </div>
+            </div>
+          )}
         </section>
 
+        {/* PAINEL TÁXI */}
         <section className="panel panel-right">
-          <h2 className="panel-title panel-title-amber">TÁXI</h2>
-          <div className="metric">
-            <div className="metric-label">CONCENTRAÇÃO</div>
-            <div className="progress">
-              <div className="progress-fill progress-amber" style={{ width: `${taxi.concentracao}%` }} />
+          <div className={`panel-inner ${relaxModal.taxi ? "blurred" : ""}`}>
+            <h2 className="panel-title panel-title-amber">TÁXI</h2>
+            <div className="metric">
+              <div className="metric-label">CONCENTRAÇÃO</div>
+              <Bar value={taxi.concentracao} className="progress-amber" />
+              <div className="metric-value metric-amber">{taxi.concentracao.toFixed(0)}%</div>
             </div>
-            <div className="metric-value metric-amber">{taxi.concentracao.toFixed(0)}%</div>
-          </div>
-          <div className="metric">
-            <div className="metric-label">BOOST</div>
-            <div className="progress">
-              <div className="progress-fill progress-green" style={{ width: `${taxi.boost}%` }} />
+            <div className="metric">
+              <div className="metric-label">BOOST</div>
+              <Bar value={taxi.boost} className="progress-green" />
+            </div>
+            <div className="kv">
+              <span>VOLTAS</span><span className="kv-value">{taxi.voltas}/{taxi.voltasTotal}</span>
+            </div>
+            <div className="kv">
+              <span>TEMPO FINAL</span><span className="kv-value">{taxi.tempoFinalMs == null ? "-:-" : fmtFinal(taxi.tempoFinalMs)}</span>
+            </div>
+            <div className="kv">
+              <span>CONEXÃO</span>
+              <span className="kv-value"><WifiIcon q={connQual.taxi} /></span>
             </div>
           </div>
-          <div className="kv">
-            <span>VOLTAS</span><span className="kv-value">{taxi.voltas}/{taxi.voltasTotal}</span>
-          </div>
-          <div className="kv">
-            <span>TEMPO FINAL</span><span className="kv-value">{taxi.tempoFinalMs == null ? "-:-" : fmtFinal(taxi.tempoFinalMs)}</span>
-          </div>
-          <div className="kv">
-            <span>CONEXÃO</span>
-            <span className="kv-value"><WifiIcon q={connQual.taxi} /></span>
-          </div>
+
+          {relaxModal.taxi && (
+            <div className="side-modal">
+              <div className="side-modal-box">
+                <h3 className="modal-title">Táxi — Relaxamento</h3>
+                <p>Concentração zerou. Retoma quando <b>relaxamento ≥ 50%</b>.</p>
+                <div className="metric">
+                  <div className="metric-label">RELAXAMENTO</div>
+                  <Bar value={relax.taxi} className="progress-amber" />
+                  <div className="metric-value metric-amber">{relax.taxi.toFixed(0)}%</div>
+                </div>
+              </div>
+            </div>
+          )}
         </section>
       </main>
 
@@ -392,7 +428,6 @@ export default function TelaCorrida({ onBack, corrida }) {
         <button className="btn" onClick={finalizeManually}>Finalizar Corrida</button>
       </footer>
 
-      {/* Modal de conexão */}
       {connectModalOpen && (
         <div
           className="modal-backdrop"
@@ -433,7 +468,6 @@ export default function TelaCorrida({ onBack, corrida }) {
         </div>
       )}
 
-      {/* Modal de resultado */}
       {resultModalOpen && (
         <div className="modal-backdrop" onClick={goBack}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
