@@ -1,11 +1,10 @@
 // NeuroSky (HC-05) + L298N — Atenção controla PWM entre 55..80 (sem rampa).
-// Mantém atencaoSuave (decai quando perde sinal), mas NÃO imprime no Serial.
-// Piscadas: 3 em ≤2s => BOOST (dobro do MAX_PWM) por 0,5s.
-// Checkpoint: a cada 20s envia "checkpoint" e zera até relaxamento >= 70, depois "checkpoint_end".
+// Piscadas: 3 em ≤2s => BOOST por 0,5s.
+// Checkpoint: a cada 20s envia "checkpoint", para até relax >= 70, depois "checkpoint_end".
+// Voltas: sensor MH no D2 com POLLING (mesma lógica do teste), one-shot + debounce.
 
+// ================== BLUETOOTH / THINKGEAR ==================
 #include <SoftwareSerial.h>
-
-// ====== Bluetooth (HC-05) ======
 #define BT_RX 11
 #define BT_TX 10
 SoftwareSerial BT(BT_RX, BT_TX);
@@ -14,32 +13,31 @@ SoftwareSerial BT(BT_RX, BT_TX);
 #define BAUD_USB  115200
 #define SYNC      0xAA
 
-// ====== Ponte H (L298N) ======
-const int ENA = 9;   // PWM (remover jumper ENB para usar PWM aqui)
-const int IN1 = 3;   // direção
-const int IN2 = 4;   // direção
+// ================== PONTE H (L298N) ==================
+const int ENB = 9;   // PWM
+const int IN3 = 3;   // direçãom=
+const int IN4 = 4;   // direção
 
-// ====== Limites de velocidade (PWM) ======
+// ================== PWM LIMITES ==================
 const int MIN_PWM = 50;
 const int MAX_PWM = 80;
+const int BOOST_PWM = (int)min((long)(MAX_PWM * 12L / 10L), 255L); // ~+20%
 
-// ====== Boost por piscadas ======
-const unsigned long BLINK_GAP_MS = 2000;   // ≤ 2s entre piscadas
-const unsigned long BOOST_MS      = 500;   // 0,5s
-const int BOOST_PWM = (int)min((long)(MAX_PWM * 1.2L), 255L);  // dobro do máximo (80->160)
-
+// ================== BLINK / BOOST ==================
+const unsigned long BLINK_GAP_MS = 2000;
+const unsigned long BOOST_MS      = 500;
 int  blinkCount           = 0;
 unsigned long lastBlinkMs = 0;
 bool boostAtivo           = false;
 unsigned long boostFimMs  = 0;
 
-// ====== Detector de blink por RAW ======
-const int   THRESHOLD   = 600;   // |raw - baseline|
-const int   REFRACT_MS  = 250;   // período refratário
-const int   BASE_WIN    = 64;    // janela média móvel p/ baseline
-const int   MIN_PEAK_MS = 15;    // duração mínima acima do limiar
-const int   BLINK_MIN   = 160;   // força mínima aceita (0..255)
-const int   BLINK_MAX   = 200;   // força máxima aceita
+// ================== BLINK POR RAW ==================
+const int   THRESHOLD   = 600;
+const int   REFRACT_MS  = 250;
+const int   BASE_WIN    = 64;
+const int   MIN_PEAK_MS = 15;
+const int   BLINK_MIN   = 160;
+const int   BLINK_MAX   = 200;
 
 long lastBlinkRawMs = -10000;
 int  baseBuf[BASE_WIN];
@@ -48,28 +46,41 @@ long baseSum = 0;
 bool baseFilled = false;
 int  aboveCount = 0;
 
-// ====== Parser ======
+// ================== PARSER ==================
 uint8_t payload[169];
 uint8_t plength=0, pindex=0, csum=0, csumRx=0;
 enum S { SYNC1, SYNC2, LEN, DATA, CHK }; S st = SYNC1;
 
-// ====== Métricas ======
+// ================== MÉTRICAS ==================
 int sinal        = -1;   // 0=ótimo; 200=sem contato
 int atencao      = -1;   // 0..100
 int relaxamento  = -1;   // 0..100
-int atencaoSuave = 0;    // 0..100 (decai quando sem sinal)
+int atencaoSuave = 0;    // 0..100
 
-// ====== Temporização / link ======
-unsigned long lastByteMs    = 0;  // qualquer byte recebido
-unsigned long lastSignalMs  = 0;  // última tag 0x02 (POOR_SIGNAL)
-unsigned long lastDecayMs   = 0;  // <<< global para o decaimento
+// ================== LINK / TEMPOS ==================
+unsigned long lastByteMs    = 0;
+unsigned long lastSignalMs  = 0;
+unsigned long lastDecayMs   = 0;
 bool linkAtivo() { return (millis() - lastByteMs) < 1500; }
 
-// ====== Checkpoint ======
-const unsigned long CHECKPOINT_INTERVAL_MS = 20000UL; // a cada 20s
-const int RELAX_OK = 70;                               // sair quando relax >= 70
+// ================== CHECKPOINT ==================
+const unsigned long CHECKPOINT_INTERVAL_MS = 20000UL;
+const int RELAX_OK = 70;
 unsigned long lastCheckpointMs = 0;
 bool checkpointAtivo = false;
+
+// ================== VOLTAS — POLLING IGUAL AO TESTE ==================
+const uint8_t IR_PIN = 2;           // DO do MH no D2
+const bool    USE_PULLUP = false;   // mude para true se o nível flutuar
+const bool    ACTIVE_LOW = true;    // se no seu teste contou em LOW, mantenha true; se contou em HIGH, troque para false
+const unsigned long DEBOUNCE_MS = 60; // 40–120 ms conforme ruído/velocidade
+
+volatile unsigned long lapCount = 0;
+
+int irIdleLevel, irActiveLevel;
+int lastLevel = -1;
+bool armed = true;
+unsigned long lastEdgeMs = 0;
 
 // ---------- Utilidades ----------
 void resetParser() { st = SYNC1; plength=0; pindex=0; csum=0; }
@@ -88,7 +99,6 @@ int updateBaseline(int sample) {
   return baseSum / n;
 }
 
-// ====== Blink comum (chamado por 0x16 e por RAW) ======
 void onValidBlink(int strength) {
   if (strength < BLINK_MIN || strength > BLINK_MAX) return;
 
@@ -109,7 +119,6 @@ void onValidBlink(int strength) {
   }
 }
 
-// ====== Detector baseado em RAW ======
 void processRawSample(int raw) {
   static int baseline = 0;
   baseline = updateBaseline(raw);
@@ -130,14 +139,13 @@ void processRawSample(int raw) {
   }
 }
 
-// ====== Decaimento da ATENÇÃO quando sem sinal ======
+// ====== Decaimento da ATENÇÃO ======
 #define DECAY_PER_SEC 20
 #define DECAY_TICK_MS 100
 void updateAttentionDecay() {
   unsigned long now = millis();
   if (atencaoSuave < 0) atencaoSuave = max(0, atencao);
 
-  // Sem sinal = (sinal >= 200) OU link caiu
   bool semSinal = (sinal >= 200) || !linkAtivo();
 
   if (semSinal) {
@@ -149,7 +157,6 @@ void updateAttentionDecay() {
       lastDecayMs = now;
     }
   } else {
-    // Com sinal bom: segue a atenção crua
     if (atencao >= 0) atencaoSuave = atencao;
     lastDecayMs = now;
   }
@@ -167,37 +174,77 @@ void processPayload(uint8_t* buf, uint8_t len) {
       if (code == 0x02) { sinal = val; lastSignalMs = millis(); }
       else if (code == 0x04) { atencao = val; }
       else if (code == 0x05) { relaxamento = val; }
-      else if (code == 0x16) { onValidBlink(val); } // BLINK_STRENGTH
+      else if (code == 0x16) { onValidBlink(val); }
     } else {
       if (i >= len) break;
       uint8_t vlen = buf[i++];
       if (i + vlen > len) break;
 
-      // RAW: 0x80, len=0x02 => [hi][lo]
       if (code == 0x80 && vlen == 0x02 && (i + 1) < len) {
         int hi  = (int8_t)buf[i++];
         int lo  = buf[i++] & 0xFF;
-        int raw = (hi << 8) | lo; // 16-bit signed
+        int raw = (hi << 8) | lo;
         processRawSample(raw);
       } else {
-        i += vlen; // ignora blocos longos (ex.: 0x83)
+        i += vlen;
       }
     }
   }
 }
 
-// ====== APLICA PWM (SEM RAMPA) ======
+// ====== Aplicar PWM ======
 void aplicarPWM(int pwmOut) {
   pwmOut = constrain(pwmOut, 0, 255);
-  analogWrite(ENB, pwmOut);             // direção já setada no setup()
+  analogWrite(ENB, pwmOut);
 }
 
+// ====== VOLTAS: inicialização (igual ao teste) ======
+void initLapSensor(){
+  pinMode(IR_PIN, USE_PULLUP ? INPUT_PULLUP : INPUT);
+  irIdleLevel   = ACTIVE_LOW ? HIGH : LOW;
+  irActiveLevel = ACTIVE_LOW ? LOW  : HIGH;
+  lastLevel = digitalRead(IR_PIN);
+  armed = true;
+  lastEdgeMs = 0;
+}
+
+// ====== VOLTAS: serviço por polling (igual ao teste) ======
+void serviceLapSensor(){
+  int level = digitalRead(IR_PIN);
+  unsigned long now = millis();
+
+  // espelho opcional no LED 13 para debug
+  // digitalWrite(13, level);
+
+  // borda + debounce
+  if (level != lastLevel){
+    if (now - lastEdgeMs >= DEBOUNCE_MS){
+      lastEdgeMs = now;
+      // conta apENBs quando entra no nível ativo e estiver armado
+      if (level == irActiveLevel && armed){
+        lapCount++;
+        Serial.print(F("{\"evento\":\"lap\",\"voltas\":"));
+        Serial.print(lapCount);
+        Serial.println(F("}"));
+        armed = false; // one-shot
+      }
+    }
+    lastLevel = level;
+  }
+
+  // rearme quando liberar o feixe
+  if (!armed && level == irIdleLevel){
+    armed = true;
+  }
+}
+
+// ================== SETUP ==================
 void setup() {
   // Ponte H
   pinMode(ENB, OUTPUT);
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
-  digitalWrite(IN3, HIGH);   // frente (troque HIGH/LOW se inverter)
+  digitalWrite(IN3, HIGH);   // troque HIGH/LOW se inverter
   digitalWrite(IN4, LOW);
   analogWrite(ENB, 0);
 
@@ -205,12 +252,17 @@ void setup() {
   Serial.begin(BAUD_USB);
   BT.begin(BAUD_BT);
 
+  // Voltas
+  pinMode(13, OUTPUT); // opcional debug
+  initLapSensor();
+
   lastCheckpointMs = millis();
   lastDecayMs = millis();
 
   Serial.println(F("{\"status\":\"iniciando\",\"bt\":57600,\"usb\":115200}"));
 }
 
+// ================== LOOP ==================
 void loop() {
   // --- Recepção BT / Parser ---
   while (BT.available()) {
@@ -237,18 +289,18 @@ void loop() {
     }
   }
 
-  // Fallback: se faz >2s sem 0x02 ou o link caiu, considere sem contato
+  // Sem contato se >2s sem 0x02 ou link caiu
   if ((millis() - lastSignalMs) > 2000 || !linkAtivo()) {
     sinal = 200;
   }
 
-  // Mantém decaimento MESMO sem pacotes
+  // Decaimento mesmo sem pacotes
   updateAttentionDecay();
 
-  // ---------- BOOST: encerra quando expirar ----------
+  // BOOST
   if (boostAtivo && millis() >= boostFimMs) boostAtivo = false;
 
-  // ---------- CHECKPOINT: a cada 20s, para até relax >= 70 ----------
+  // CHECKPOINT
   unsigned long now = millis();
   if (!checkpointAtivo && (now - lastCheckpointMs >= CHECKPOINT_INTERVAL_MS)) {
     checkpointAtivo = true;
@@ -260,35 +312,36 @@ void loop() {
     Serial.println(F("checkpoint_end"));
   }
 
-  // ---------- Alvo de PWM ----------
-  int targetPWM = 0;
+  // Voltas
+  serviceLapSensor();
 
+  // PWM alvo
+  int targetPWM = 0;
   if (boostAtivo) {
-    targetPWM = BOOST_PWM; // boost tem prioridade
+    targetPWM = BOOST_PWM;
   } else if (checkpointAtivo) {
-    targetPWM = 0;         // parado até relaxamento >= 70
+    targetPWM = 0;
   } else if (sinal < 200 && linkAtivo() && atencaoSuave > 0) {
-    // 1..100 -> MIN..MAX usando atenção SUAVIZADA
     targetPWM = map(constrain(atencaoSuave, 1, 100), 1, 100, MIN_PWM, MAX_PWM);
   } else {
-    // sem contato: atencaoSuave vai decaindo até 0
     targetPWM = (atencaoSuave <= 0) ? 0 : map(atencaoSuave, 1, 100, MIN_PWM, MAX_PWM);
   }
-
   aplicarPWM(targetPWM);
 
-  // ---------- Debug enxuto (NÃO imprime atencaoSuave) ----------
-  static unsigned long lastDbg=0;
-  if (now - lastDbg >= 500) {
-    lastDbg = now;
-    int attLog = checkpointAtivo ? 0 : atencao; // mostra 0 durante checkpoint
-    Serial.print(F("{\"link\":"));       Serial.print(linkAtivo()?"true":"false");
-    Serial.print(F(",\"sinal\":"));      Serial.print(sinal);
-    Serial.print(F(",\"att\":"));        Serial.print(attLog);
-    Serial.print(F(",\"relax\":"));      Serial.print(relaxamento);
-    Serial.print(F(",\"checkpoint\":")); Serial.print(checkpointAtivo ? 1 : 0);
-    Serial.print(F(",\"boost\":"));      Serial.print(boostAtivo ? 1 : 0);
-    Serial.print(F(",\"pwm\":"));        Serial.print(targetPWM);
-    Serial.println(F("}"));
-  }
+  // Log enxuto a cada 500 ms
+static unsigned long lastDbg=0;
+if (now - lastDbg >= 500) {
+  lastDbg = now;
+  int attLog = checkpointAtivo ? 0 : atencao;
+  Serial.print(F("{\"link\":"));          Serial.print(linkAtivo()?"true":"false");
+  Serial.print(F(",\"conexao\":"));       Serial.print(sinal);
+  Serial.print(F(",\"lado\":\"taxi\"")); // <-- corrigido
+  Serial.print(F(",\"concentracao\":"));  Serial.print(attLog);
+  Serial.print(F(",\"relaxamento\":"));   Serial.print(relaxamento);
+  Serial.print(F(",\"checkpoint\":"));    Serial.print(checkpointAtivo ? 1 : 0);
+  Serial.print(F(",\"boost\":"));         Serial.print(boostAtivo ? 1 : 0);
+  Serial.print(F(",\"pwm\":"));           Serial.print(targetPWM);
+  Serial.print(F(",\"voltas\":"));        Serial.print(lapCount);
+  Serial.println(F("}"));
+}
 }

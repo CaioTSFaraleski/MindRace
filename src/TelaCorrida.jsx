@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import "./TelaCorrida.css";
 
-const BAUD = 57600;
+const BAUD = 115200; // use o MESMO baud do Serial USB no Arduino
 const DEFAULT_TOTAL = 10;
 
 const initialPlayer = (voltasTotal = DEFAULT_TOTAL) => ({
@@ -110,8 +110,10 @@ export default function TelaCorrida({ onBack, corrida }) {
     setRunning(false);
   }, [running]);
 
-  const checkConnectedOnZero = useCallback((lado, conexaoVal) => {
-    if (conexaoVal <= 0 && !connectedOnceRef.current[lado]) {
+  // NOVO: conecta quando conexao < 200 (0..199 = válido)
+  const markConnected = useCallback((lado, conexaoVal) => {
+    const ok = Number.isFinite(conexaoVal) && conexaoVal >= 0 && conexaoVal < 200;
+    if (ok && !connectedOnceRef.current[lado]) {
       connectedOnceRef.current[lado] = true;
       setConn((c) => ({ ...c, [lado]: "conectado" }));
       const both = connectedOnceRef.current.policia && connectedOnceRef.current.taxi;
@@ -122,47 +124,38 @@ export default function TelaCorrida({ onBack, corrida }) {
     }
   }, [connectModalOpen, startTimer]);
 
-  const applyPlayer = useCallback(
-    (lado, data) => {
-      if (data && typeof data.conexao !== "undefined") {
-        const q = Math.max(0, Math.min(200, Number(data.conexao) || 0));
-        setConnQual((prev) => ({ ...prev, [lado]: q }));
-        checkConnectedOnZero(lado, q);
-      }
+  // ==== applyPlayer determinístico ====
+  const applyPlayer = useCallback((lado, data) => {
+    const q  = Math.max(0, Math.min(200, Number(data.conexao) ?? 200));
+    const cx = Math.max(0, Math.min(100, Number(data.concentracao) ?? 0));
+    const rl = Math.max(0, Math.min(100, Number(data.relaxamento) ?? 0));
+    const bs = Math.max(0, Math.min(100, Number(data.boost) ?? 0));
+    const vt = Math.max(0, Number.isFinite(data.voltas) ? Number(data.voltas) : 0);
 
-      if (typeof data.relaxamento !== "undefined") {
-        const r = Math.max(0, Math.min(100, Number(data.relaxamento) || 0));
-        setRelax((prev) => ({ ...prev, [lado]: r }));
-        if (r >= 50) setRelaxModal((m) => (m[lado] ? { ...m, [lado]: false } : m));
-      }
+    setConnQual(p => ({ ...p, [lado]: q }));
+    markConnected(lado, q);
+    setRelax(p => ({ ...p, [lado]: rl }));
 
-      const update = (prev) => {
-        const total = prev.voltasTotal || DEFAULT_TOTAL;
-        const lapsRaw = Math.min(total, Math.max(0, Number(data.voltas) || 0));
-        const concNext = Math.max(0, Math.min(100, Number(data.concentracao) || 0));
-        const relaxNow = (lado === "policia" ? (typeof data.relaxamento==="number"?data.relaxamento:relax.policia)
-                                              : (typeof data.relaxamento==="number"?data.relaxamento:relax.taxi));
-        const needRelaxModal = lapsRaw >= 5 && concNext <= 0 && relaxNow < 50;
-        setRelaxModal((m) => ({ ...m, [lado]: needRelaxModal }));
+    const setPlayer = lado === "policia" ? setPolicia : setTaxi;
+    setPlayer(prev => {
+      const total = prev.voltasTotal || DEFAULT_TOTAL;
+      const needRelaxModal = (vt >= 5 && cx <= 0 && rl < 50);
+      setRelaxModal(m => ({ ...m, [lado]: needRelaxModal }));
 
-        const blocked = needRelaxModal;
-        const laps = blocked ? Math.min(prev.voltas, lapsRaw) : lapsRaw;
+      const laps = needRelaxModal ? Math.min(prev.voltas, vt) : Math.min(total, vt);
+      const finishedNow = prev.tempoFinalMs == null && laps >= total && running;
 
-        const finishedNow = prev.tempoFinalMs == null && laps >= total && running;
-        return {
-          ...prev,
-          concentracao: concNext,
-          boost: Math.min(100, Math.max(0, Number(data.boost) || 0)),
-          voltas: laps,
-          voltasTotal: total,
-          tempoFinalMs: finishedNow ? timerMs : prev.tempoFinalMs,
-        };
+      return {
+        ...prev,
+        concentracao: cx,
+        boost: bs,
+        voltas: laps,
+        voltasTotal: total,
+        tempoFinalMs: finishedNow ? timerMs : prev.tempoFinalMs,
       };
-      if (lado === "policia") setPolicia(update);
-      else if (lado === "taxi") setTaxi(update);
-    },
-    [running, timerMs, checkConnectedOnZero, relax]
-  );
+    });
+  }, [running, timerMs, markConnected]);
+  // ====================================
 
   const parseLine = useCallback(
     (line, sideFallback) => {
@@ -214,6 +207,7 @@ export default function TelaCorrida({ onBack, corrida }) {
         } catch {
         } finally {
           try { await reader.cancel(); } catch {}
+          try { reader.releaseLock(); } catch {}
           try { await readableClosed; } catch {}
           try { await port.close(); } catch {}
         }
@@ -238,6 +232,9 @@ export default function TelaCorrida({ onBack, corrida }) {
             taxi: c.taxi === "desconectado" ? "conectando" : c.taxi,
           }));
           await port.open({ baudRate: BAUD });
+          // PATCH: seta DTR/RTS e warm-up
+          try { await port.setSignals({ dataTerminalReady: true, requestToSend: true }); } catch {}
+          await new Promise(r => setTimeout(r, 300));
           connectReaderLoop(port);
         }
       } catch {}
@@ -248,6 +245,7 @@ export default function TelaCorrida({ onBack, corrida }) {
       if (timerRef.current) clearInterval(timerRef.current);
       connsRef.current.forEach(async (c) => {
         try { await c.reader?.cancel(); } catch {}
+        try { c.reader?.releaseLock(); } catch {}
         try { await c.port?.close(); } catch {}
       });
       connsRef.current = [];
@@ -267,6 +265,9 @@ export default function TelaCorrida({ onBack, corrida }) {
         }));
         const port = await navigator.serial.requestPort();
         await port.open({ baudRate: BAUD });
+        // PATCH: seta DTR/RTS e warm-up
+        try { await port.setSignals({ dataTerminalReady: true, requestToSend: true }); } catch {}
+        await new Promise(r => setTimeout(r, 300));
         connectReaderLoop(port);
       }
     } catch {
