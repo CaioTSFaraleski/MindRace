@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import "./TelaCorrida.css";
 
-const BAUD = 115200; // use o MESMO baud do Serial USB no Arduino
+const BAUD = 115200; // mesmo baud do Serial USB do Arduino
 const DEFAULT_TOTAL = 10;
 
 const initialPlayer = (voltasTotal = DEFAULT_TOTAL) => ({
@@ -35,14 +35,30 @@ function WifiIcon({ q }) {
   );
 }
 
-function Bar({ value, className }) {
+// ---- Eye (blink) icon ----
+const EyeIcon = ({ active = false, className = "" }) => (
+  <svg
+    width="22" height="14" viewBox="0 0 24 14" aria-label="blink"
+    className={`${className} ${active ? "eye-on" : ""}`}
+  >
+    <path
+      d="M1,7 C3.5,2 8,1 12,1 C16,1 20.5,2 23,7 C20.5,12 16,13 12,13 C8,13 3.5,12 1,7 Z"
+      fill="none"
+      stroke={active ? "#fff" : "rgba(255,255,255,0.45)"}
+      strokeWidth="1.7"
+    />
+    <circle cx="12" cy="7" r="3.2" fill={active ? "#fff" : "rgba(255,255,255,0.45)"} />
+  </svg>
+);
+
+const Bar = React.memo(function Bar({ value, className }) {
   const v = Math.max(0, Math.min(100, Number(value) || 0));
   return (
     <div className={`progress ${className || ""}`}>
       <div className="progress-fill" style={{ width: `${v}%` }} />
     </div>
   );
-}
+});
 
 export default function TelaCorrida({ onBack, corrida }) {
   const [policia, setPolicia] = useState(() => initialPlayer(DEFAULT_TOTAL));
@@ -68,6 +84,18 @@ export default function TelaCorrida({ onBack, corrida }) {
 
   const [relax, setRelax] = useState({ policia: 0, taxi: 0 });
   const [relaxModal, setRelaxModal] = useState({ policia: false, taxi: false });
+
+  // ---- Blink feedback (olho piscando) ----
+  const [blinkState, setBlinkState] = useState({ policia: 0, taxi: 0 });
+  const BLINK_HOLD_MS = 220; // animação rápida ~180ms + margem
+
+  const isBlinking = useCallback((lado) => {
+    const t = blinkState[lado] || 0;
+    return (performance.now() - t) < BLINK_HOLD_MS;
+  }, [blinkState]);
+
+  const eyeWrapStyle = { position: "absolute", top: 8, right: 10, opacity: 0.95 };
+  // ----------------------------------------
 
   useEffect(() => {
     connectedOnceRef.current = { policia: false, taxi: false };
@@ -110,57 +138,89 @@ export default function TelaCorrida({ onBack, corrida }) {
     setRunning(false);
   }, [running]);
 
-  // NOVO: conecta quando conexao < 200 (0..199 = válido)
+  // NÃO inicia mais automaticamente. Apenas marca "conectado".
   const markConnected = useCallback((lado, conexaoVal) => {
     const ok = Number.isFinite(conexaoVal) && conexaoVal >= 0 && conexaoVal < 200;
     if (ok && !connectedOnceRef.current[lado]) {
       connectedOnceRef.current[lado] = true;
       setConn((c) => ({ ...c, [lado]: "conectado" }));
-      const both = connectedOnceRef.current.policia && connectedOnceRef.current.taxi;
-      if (both && connectModalOpen) {
-        setConnectModalOpen(false);
-        startTimer();
-      }
+      // sem auto-start aqui
     }
-  }, [connectModalOpen, startTimer]);
+  }, []);
 
-  // ==== applyPlayer determinístico ====
+  // ==== applyPlayer: usa voltasTotal do Arduino (quando vier) ====
   const applyPlayer = useCallback((lado, data) => {
-    const q  = Math.max(0, Math.min(200, Number(data.conexao) ?? 200));
-    const cx = Math.max(0, Math.min(100, Number(data.concentracao) ?? 0));
-    const rl = Math.max(0, Math.min(100, Number(data.relaxamento) ?? 0));
-    const bs = Math.max(0, Math.min(100, Number(data.boost) ?? 0));
-    const vt = Math.max(0, Number.isFinite(data.voltas) ? Number(data.voltas) : 0);
+    setConnQual(prev => {
+      const prevQ = prev[lado];
+      const n = Number(data?.conexao);
+      const q = Number.isFinite(n) ? Math.max(0, Math.min(200, n))
+                                   : (Number.isFinite(prevQ) ? prevQ : 200);
+      markConnected(lado, q);
+      return { ...prev, [lado]: q };
+    });
 
-    setConnQual(p => ({ ...p, [lado]: q }));
-    markConnected(lado, q);
-    setRelax(p => ({ ...p, [lado]: rl }));
+    setRelax(prev => {
+      const prevR = prev[lado];
+      const n = Number(data?.relaxamento);
+      const r = Number.isFinite(n) ? Math.max(0, Math.min(100, n))
+                                   : (Number.isFinite(prevR) ? prevR : 0);
+      return { ...prev, [lado]: r };
+    });
 
     const setPlayer = lado === "policia" ? setPolicia : setTaxi;
     setPlayer(prev => {
-      const total = prev.voltasTotal || DEFAULT_TOTAL;
-      const needRelaxModal = (vt >= 5 && cx <= 0 && rl < 50);
+      const nT = Number(data?.voltasTotal);
+      const totalFromArduino = Number.isFinite(nT) && nT > 0 ? Math.floor(nT) : prev.voltasTotal || DEFAULT_TOTAL;
+
+      const nC = Number(data?.concentracao);
+      const cx = Number.isFinite(nC) ? Math.max(0, Math.min(100, nC))
+                                     : (Number.isFinite(prev.concentracao) ? prev.concentracao : 0);
+
+      const nB = Number(data?.boost);
+      const bs = Number.isFinite(nB) ? Math.max(0, Math.min(100, nB))
+                                     : (Number.isFinite(prev.boost) ? prev.boost : 0);
+
+      const nV = Number(data?.voltas);
+      const vtRaw = Number.isFinite(nV) ? nV : prev.voltas;
+      const laps  = Math.min(totalFromArduino, Math.max(0, vtRaw));
+
+      const rlSnapshot =
+        lado === "policia"
+          ? (Number.isFinite(relax.policia) ? relax.policia : 0)
+          : (Number.isFinite(relax.taxi) ? relax.taxi : 0);
+
+      const needRelaxModal = (laps >= 5 && cx <= 0 && rlSnapshot < 50);
       setRelaxModal(m => ({ ...m, [lado]: needRelaxModal }));
 
-      const laps = needRelaxModal ? Math.min(prev.voltas, vt) : Math.min(total, vt);
-      const finishedNow = prev.tempoFinalMs == null && laps >= total && running;
+      const finishedNow = prev.tempoFinalMs == null && laps >= totalFromArduino && running;
 
       return {
         ...prev,
         concentracao: cx,
         boost: bs,
-        voltas: laps,
-        voltasTotal: total,
+        voltas: needRelaxModal ? Math.min(prev.voltas, laps) : laps,
+        voltasTotal: totalFromArduino,
         tempoFinalMs: finishedNow ? timerMs : prev.tempoFinalMs,
       };
     });
-  }, [running, timerMs, markConnected]);
+  }, [running, timerMs, relax, markConnected]);
   // ====================================
 
   const parseLine = useCallback(
     (line, sideFallback) => {
       try {
         const obj = JSON.parse(line.trim());
+
+        // 1) Evento de blink vindo do Arduino
+        if (obj && obj.evento === "blink") {
+          const ladoBlink = obj.lado ? String(obj.lado).toLowerCase() : sideFallback;
+          if (ladoBlink === "policia" || ladoBlink === "taxi") {
+            setBlinkState(prev => ({ ...prev, [ladoBlink]: performance.now() }));
+          }
+          return;
+        }
+
+        // 2) Atualização normal de estado por lado
         const lado = obj.lado ? String(obj.lado).toLowerCase() : sideFallback;
         if (lado === "policia" || lado === "taxi") {
           applyPlayer(lado, obj);
@@ -189,8 +249,20 @@ export default function TelaCorrida({ onBack, corrida }) {
               while ((idx = connObj.buffer.indexOf("\n")) >= 0) {
                 const line = connObj.buffer.slice(0, idx);
                 connObj.buffer = connObj.buffer.slice(idx + 1);
+
+                // Tenta parse direto (pode ser evento de blink)
                 try {
                   const obj = JSON.parse(line.trim());
+
+                  if (obj && obj.evento === "blink") {
+                    const ladoBlink = obj.lado ? String(obj.lado).toLowerCase() : null;
+                    if (ladoBlink === "policia" || ladoBlink === "taxi") {
+                      connObj.side = ladoBlink;
+                      setBlinkState(prev => ({ ...prev, [ladoBlink]: performance.now() }));
+                      continue;
+                    }
+                  }
+
                   const lado = obj.lado ? String(obj.lado).toLowerCase() : null;
                   if (lado === "policia" || lado === "taxi") {
                     connObj.side = lado;
@@ -198,6 +270,8 @@ export default function TelaCorrida({ onBack, corrida }) {
                     continue;
                   }
                 } catch {}
+
+                // Se não deu parse ou não tinha 'lado', usa fallback
                 if (connObj.side === "policia" || connObj.side === "taxi") {
                   parseLine(line, connObj.side);
                 }
@@ -232,7 +306,6 @@ export default function TelaCorrida({ onBack, corrida }) {
             taxi: c.taxi === "desconectado" ? "conectando" : c.taxi,
           }));
           await port.open({ baudRate: BAUD });
-          // PATCH: seta DTR/RTS e warm-up
           try { await port.setSignals({ dataTerminalReady: true, requestToSend: true }); } catch {}
           await new Promise(r => setTimeout(r, 300));
           connectReaderLoop(port);
@@ -265,7 +338,6 @@ export default function TelaCorrida({ onBack, corrida }) {
         }));
         const port = await navigator.serial.requestPort();
         await port.open({ baudRate: BAUD });
-        // PATCH: seta DTR/RTS e warm-up
         try { await port.setSignals({ dataTerminalReady: true, requestToSend: true }); } catch {}
         await new Promise(r => setTimeout(r, 300));
         connectReaderLoop(port);
@@ -335,6 +407,18 @@ export default function TelaCorrida({ onBack, corrida }) {
 
   const needPairing = connsRef.current.length < 2;
 
+  // ---- Botão "Iniciar corrida" no modal ----
+  const connectedCount =
+    (conn.policia === "conectado" ? 1 : 0) + (conn.taxi === "conectado" ? 1 : 0);
+
+  const beginRaceFromModal = () => {
+    if (connectedCount >= 1) {
+      setConnectModalOpen(false);
+      startTimer();
+    }
+  };
+  // ------------------------------------------
+
   return (
     <div className="t2-wrapper">
       <div className="t2-bg" />
@@ -347,21 +431,29 @@ export default function TelaCorrida({ onBack, corrida }) {
         {/* PAINEL POLÍCIA */}
         <section className="panel panel-left">
           <div className={`panel-inner ${relaxModal.policia ? "blurred" : ""}`}>
+            {/* olhinho de blink */}
+            <div style={eyeWrapStyle} title="Blink detectado">
+              <EyeIcon active={isBlinking("policia")} className="eye" />
+            </div>
+
             <h2 className="panel-title panel-title-cyan">POLÍCIA</h2>
             <div className="metric">
               <div className="metric-label">CONCENTRAÇÃO</div>
-              <Bar value={policia.concentracao} className="progress-cyan" />
-              <div className="metric-value metric-cyan">{policia.concentracao.toFixed(0)}%</div>
+              <Bar value={Number.isFinite(policia.concentracao) ? policia.concentracao : 0} className="progress-cyan" />
+              <div className="metric-value metric-cyan">
+                {Number.isFinite(policia.concentracao) ? policia.concentracao.toFixed(0) : "0"}%
+              </div>
             </div>
             <div className="metric">
               <div className="metric-label">BOOST</div>
-              <Bar value={policia.boost} className="progress-green" />
+              <Bar value={Number.isFinite(policia.boost) ? policia.boost : 0} className="progress-green" />
             </div>
             <div className="kv">
               <span>VOLTAS</span><span className="kv-value">{policia.voltas}/{policia.voltasTotal}</span>
             </div>
             <div className="kv">
-              <span>TEMPO FINAL</span><span className="kv-value">{policia.tempoFinalMs == null ? "-:-" : fmtFinal(policia.tempoFinalMs)}</span>
+              <span>TEMPO FINAL</span>
+              <span className="kv-value">{typeof policia.tempoFinalMs === "number" ? fmtFinal(policia.tempoFinalMs) : "-:-"}</span>
             </div>
             <div className="kv">
               <span>CONEXÃO</span>
@@ -376,8 +468,10 @@ export default function TelaCorrida({ onBack, corrida }) {
                 <p>Concentração zerou. Retoma quando <b>relaxamento ≥ 50%</b>.</p>
                 <div className="metric">
                   <div className="metric-label">RELAXAMENTO</div>
-                  <Bar value={relax.policia} className="progress-cyan" />
-                  <div className="metric-value metric-cyan">{relax.policia.toFixed(0)}%</div>
+                  <Bar value={Number.isFinite(relax.policia) ? relax.policia : 0} className="progress-cyan" />
+                  <div className="metric-value metric-cyan">
+                    {Number.isFinite(relax.policia) ? relax.policia.toFixed(0) : "0"}%
+                  </div>
                 </div>
               </div>
             </div>
@@ -387,21 +481,29 @@ export default function TelaCorrida({ onBack, corrida }) {
         {/* PAINEL TÁXI */}
         <section className="panel panel-right">
           <div className={`panel-inner ${relaxModal.taxi ? "blurred" : ""}`}>
+            {/* olhinho de blink */}
+            <div style={eyeWrapStyle} title="Blink detectado">
+              <EyeIcon active={isBlinking("taxi")} className="eye" />
+            </div>
+
             <h2 className="panel-title panel-title-amber">TÁXI</h2>
             <div className="metric">
               <div className="metric-label">CONCENTRAÇÃO</div>
-              <Bar value={taxi.concentracao} className="progress-amber" />
-              <div className="metric-value metric-amber">{taxi.concentracao.toFixed(0)}%</div>
+              <Bar value={Number.isFinite(taxi.concentracao) ? taxi.concentracao : 0} className="progress-amber" />
+              <div className="metric-value metric-amber">
+                {Number.isFinite(taxi.concentracao) ? taxi.concentracao.toFixed(0) : "0"}%
+              </div>
             </div>
             <div className="metric">
               <div className="metric-label">BOOST</div>
-              <Bar value={taxi.boost} className="progress-green" />
+              <Bar value={Number.isFinite(taxi.boost) ? taxi.boost : 0} className="progress-green" />
             </div>
             <div className="kv">
               <span>VOLTAS</span><span className="kv-value">{taxi.voltas}/{taxi.voltasTotal}</span>
             </div>
             <div className="kv">
-              <span>TEMPO FINAL</span><span className="kv-value">{taxi.tempoFinalMs == null ? "-:-" : fmtFinal(taxi.tempoFinalMs)}</span>
+              <span>TEMPO FINAL</span>
+              <span className="kv-value">{typeof taxi.tempoFinalMs === "number" ? fmtFinal(taxi.tempoFinalMs) : "-:-"}</span>
             </div>
             <div className="kv">
               <span>CONEXÃO</span>
@@ -416,8 +518,10 @@ export default function TelaCorrida({ onBack, corrida }) {
                 <p>Concentração zerou. Retoma quando <b>relaxamento ≥ 50%</b>.</p>
                 <div className="metric">
                   <div className="metric-label">RELAXAMENTO</div>
-                  <Bar value={relax.taxi} className="progress-amber" />
-                  <div className="metric-value metric-amber">{relax.taxi.toFixed(0)}%</div>
+                  <Bar value={Number.isFinite(relax.taxi) ? relax.taxi : 0} className="progress-amber" />
+                  <div className="metric-value metric-amber">
+                    {Number.isFinite(relax.taxi) ? relax.taxi.toFixed(0) : "0"}%
+                  </div>
                 </div>
               </div>
             </div>
@@ -448,19 +552,37 @@ export default function TelaCorrida({ onBack, corrida }) {
                 <li>Táxi: <b className={statusClass(conn.taxi)}>{conn.taxi}</b></li>
               </ul>
 
+              <p>Conectados: <b>{(conn.policia === "conectado" ? 1 : 0) + (conn.taxi === "conectado" ? 1 : 0)}</b> (pode iniciar com 1 ou 2 conectados)</p>
+
               {needPairing ? (
                 <>
                   <p>Toque nesta janela ou pressione uma tecla para autorizar as 2 portas. Dois diálogos abrirão em sequência.</p>
                   {pairingInProgress && <p>Solicitando acesso aos dispositivos…</p>}
-                  <div className="modal-actions" style={{ justifyContent: "flex-end" }}>
+                  <div className="modal-actions" style={{ justifyContent: "space-between" }}>
                     <button className="btn" onClick={onBack}>Cancelar</button>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => { setConnectModalOpen(false); startTimer(); }}
+                      disabled={((conn.policia === "conectado" ? 1 : 0) + (conn.taxi === "conectado" ? 1 : 0)) < 1}
+                      title={((conn.policia === "conectado" ? 1 : 0) + (conn.taxi === "conectado" ? 1 : 0)) < 1 ? "Conecte pelo menos 1 dispositivo" : "Iniciar corrida"}
+                    >
+                      Iniciar corrida
+                    </button>
                   </div>
                 </>
               ) : (
                 <>
                   <p>Dispositivos autorizados serão reabertos automaticamente neste navegador.</p>
-                  <div className="modal-actions">
+                  <div className="modal-actions" style={{ justifyContent: "space-between" }}>
                     <button className="btn" onClick={onBack}>Cancelar</button>
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => { setConnectModalOpen(false); startTimer(); }}
+                      disabled={((conn.policia === "conectado" ? 1 : 0) + (conn.taxi === "conectado" ? 1 : 0)) < 1}
+                      title={((conn.policia === "conectado" ? 1 : 0) + (conn.taxi === "conectado" ? 1 : 0)) < 1 ? "Conecte pelo menos 1 dispositivo" : "Iniciar corrida"}
+                    >
+                      Iniciar corrida
+                    </button>
                   </div>
                 </>
               )}
@@ -474,8 +596,8 @@ export default function TelaCorrida({ onBack, corrida }) {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3 className="modal-title">Corrida finalizada</h3>
             <div className="modal-body">
-              <div><strong>Polícia:</strong> {policia.tempoFinalMs ? fmtFinal(policia.tempoFinalMs) : "—"} ({policia.voltas}/{policia.voltasTotal})</div>
-              <div><strong>Táxi:</strong> {taxi.tempoFinalMs ? fmtFinal(taxi.tempoFinalMs) : "—"} ({taxi.voltas}/{taxi.voltasTotal})</div>
+              <div><strong>Polícia:</strong> {typeof policia.tempoFinalMs === "number" ? fmtFinal(policia.tempoFinalMs) : "—"} ({policia.voltas}/{policia.voltasTotal})</div>
+              <div><strong>Táxi:</strong> {typeof taxi.tempoFinalMs === "number" ? fmtFinal(taxi.tempoFinalMs) : "—"} ({taxi.voltas}/{taxi.voltasTotal})</div>
               <div className="modal-winner">
                 {winner === "policia" && <>🏁 Vencedor: <b>POLÍCIA</b></>}
                 {winner === "taxi" && <>🏁 Vencedor: <b>TÁXI</b></>}

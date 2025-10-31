@@ -124,7 +124,6 @@
   .t2-panels{grid-template-columns:1fr}
 }
 
-
 /* Fundo igual ao mock */
 .t2-wrapper {
   position: relative;
@@ -145,22 +144,20 @@
 }
 .t2-top, .t2-panels, .t2-controls { position: relative; z-index: 1; }
 
-/* Timer topo (laranja) */
+/* Timer topo (agora branco) */
 .t2-top {
   display: flex;
   justify-content: center;
   padding-top: clamp(16px, 3vh, 40px);
 }
-/* Timer topo (agora branco) */
 .t2-timer {
   font-variant-numeric: tabular-nums;
   font-weight: 900;
   letter-spacing: 2px;
   font-size: clamp(36px, 7vw, 72px);
-  color: #ffffff; /* <- trocado de laranja para branco */
+  color: #ffffff;
   text-shadow: 0 8px 28px rgba(0,0,0,0.6);
 }
-
 
 /* Painéis centrais (lado a lado) */
 .t2-panels {
@@ -286,9 +283,7 @@
 }
 
 /* desfocar quando modal de relaxamento está ativo */
-.t2-blur {
-  filter: blur(3px);
-}
+.t2-blur { filter: blur(3px); }
 
 /* barras herdam cor via classe progress-xxx já usada */
 .progress { position: relative; width: 100%; height: 10px; background: rgba(255,255,255,.15); border-radius: 6px; overflow: hidden; }
@@ -300,3 +295,22 @@
 .progress-green { color: #22c55e; }
 .metric-value.metric-cyan { color:#22d3ee; }
 .metric-value.metric-amber { color:#f59e0b; }
+
+/* ===== Ajustes para o olhinho (blink) ===== */
+.panel .panel-inner { position: relative; }
+
+/* Blink mais rápido (≈180 ms) */
+@keyframes blinkPulseFast {
+  0%   { transform: scale(1);    opacity: .85; }
+  50%  { transform: scale(1.18); opacity: 1;    }
+  100% { transform: scale(1);    opacity: .9;   }
+}
+.eye {
+  transition: opacity 120ms ease, transform 120ms ease;
+  opacity: .55;
+}
+.eye-on {
+  opacity: .95;
+  animation: blinkPulseFast 180ms ease-in-out;
+  filter: drop-shadow(0 0 6px rgba(255,255,255,.55));
+}
