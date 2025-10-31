@@ -1,12 +1,13 @@
 // NeuroSky (HC-05) + L298N — Atenção controla PWM entre 55..80 (sem rampa).
-// Piscadas: 3 em ≤2s => BOOST por 0,5s.
-// Checkpoint: a cada 20s envia "checkpoint", para até relax >= 70, depois "checkpoint_end".
-// Voltas: sensor MH no D2 com POLLING (mesma lógica do teste), one-shot + debounce.
+// Piscadas: 3 em ≤2s => BOOST por 0,5s (só dispara se boostPct==100).
+// CHECKPOINT: dispara na metade das voltas (VOLTAS_TOTAL/2) e termina quando relax >= RELAX_OK.
+// Voltas: sensor MH no D2 com polling, one-shot + debounce.
+
+#include <SoftwareSerial.h>
 
 // ================== BLUETOOTH / THINKGEAR ==================
-#include <SoftwareSerial.h>
-#define BT_RX 10
-#define BT_TX 11
+#define BT_RX 5
+#define BT_TX 6
 SoftwareSerial BT(BT_RX, BT_TX);
 
 #define BAUD_BT   57600
@@ -23,7 +24,10 @@ const int MIN_PWM = 50;
 const int MAX_PWM = 80;
 const int BOOST_PWM = (int)min((long)(MAX_PWM * 12L / 10L), 255L); // ~+20%
 
-// ================== BLINK / BOOST ==================
+// ================== TOTAL DE VOLTAS (SITE LÊ DAQUI) ==================
+const uint16_t VOLTAS_TOTAL = 20;   // <<< ajuste aqui
+
+// ================== BLINK / BOOST (janela de disparo) ==================
 const unsigned long BLINK_GAP_MS = 2000;
 const unsigned long BOOST_MS      = 500;
 int  blinkCount           = 0;
@@ -31,13 +35,24 @@ unsigned long lastBlinkMs = 0;
 bool boostAtivo           = false;
 unsigned long boostFimMs  = 0;
 
+// ================== BOOST ACUMULATIVO (NOVO/RESTAURADO) ==================
+uint8_t boostPct = 0;                           // 0..100
+const unsigned long BOOST_TICK_MS = 20000UL;    // +5 a cada 20s
+unsigned long lastBoostTickMs = 0;              // relógio do tick
+
+inline void boostAdd5() {
+  if (boostPct < 100) {
+    boostPct = (boostPct + 5 > 100) ? 100 : (boostPct + 5);
+  }
+}
+
 // ================== BLINK POR RAW ==================
 const int   THRESHOLD   = 600;
 const int   REFRACT_MS  = 250;
 const int   BASE_WIN    = 64;
 const int   MIN_PEAK_MS = 15;
-const int   BLINK_MIN   = 160;
-const int   BLINK_MAX   = 200;
+const int   BLINK_MIN   = 50;
+const int   BLINK_MAX   = 300;
 
 long lastBlinkRawMs = -10000;
 int  baseBuf[BASE_WIN];
@@ -63,17 +78,16 @@ unsigned long lastSignalMs  = 0;
 unsigned long lastDecayMs   = 0;
 bool linkAtivo() { return (millis() - lastByteMs) < 1500; }
 
-// ================== CHECKPOINT ==================
-const unsigned long CHECKPOINT_INTERVAL_MS = 20000UL;
-const int RELAX_OK = 70;
-unsigned long lastCheckpointMs = 0;
+// ================== CHECKPOINT (metade das voltas) ==================
+const int RELAX_OK = 60;
 bool checkpointAtivo = false;
+bool checkpointDisparado = false; // dispara uma vez por corrida
 
-// ================== VOLTAS — POLLING IGUAL AO TESTE ==================
+// ================== VOLTAS — POLLING ==================
 const uint8_t IR_PIN = 2;           // DO do MH no D2
-const bool    USE_PULLUP = false;   // mude para true se o nível flutuar
-const bool    ACTIVE_LOW = true;    // se no seu teste contou em LOW, mantenha true; se contou em HIGH, troque para false
-const unsigned long DEBOUNCE_MS = 60; // 40–120 ms conforme ruído/velocidade
+const bool    USE_PULLUP = false;   // true se flutuar
+const bool    ACTIVE_LOW = true;    // se contou em LOW, deixe true
+const unsigned long DEBOUNCE_MS = 60;
 
 volatile unsigned long lapCount = 0;
 
@@ -104,6 +118,7 @@ void onValidBlink(int strength) {
 
   Serial.print(F("{\"evento\":\"blink\",\"forca\":"));
   Serial.print(strength);
+  Serial.print(F(",\"voltasTotal\":")); Serial.print(VOLTAS_TOTAL);
   Serial.println(F("}"));
 
   unsigned long now = millis();
@@ -111,11 +126,17 @@ void onValidBlink(int strength) {
   else blinkCount = (now - lastBlinkMs <= BLINK_GAP_MS) ? (blinkCount + 1) : 1;
   lastBlinkMs = now;
 
+  // Disparo do boost SOMENTE se o tanque estiver cheio (100%)
   if (blinkCount >= 3) {
     blinkCount = 0;
-    boostAtivo = true;
-    boostFimMs = now + BOOST_MS;
-    Serial.println(F("{\"evento\":\"boost\"}"));
+    if (boostPct == 100) {
+      boostAtivo = true;
+      boostFimMs = now + BOOST_MS;
+      boostPct = 0; // consome o boost
+      Serial.print(F("{\"evento\":\"boost\""));
+      Serial.print(F(",\"voltasTotal\":")); Serial.print(VOLTAS_TOTAL);
+      Serial.println(F("}"));
+    }
   }
 }
 
@@ -198,7 +219,7 @@ void aplicarPWM(int pwmOut) {
   analogWrite(ENA, pwmOut);
 }
 
-// ====== VOLTAS: inicialização (igual ao teste) ======
+// ====== VOLTAS: inicialização ======
 void initLapSensor(){
   pinMode(IR_PIN, USE_PULLUP ? INPUT_PULLUP : INPUT);
   irIdleLevel   = ACTIVE_LOW ? HIGH : LOW;
@@ -208,31 +229,31 @@ void initLapSensor(){
   lastEdgeMs = 0;
 }
 
-// ====== VOLTAS: serviço por polling (igual ao teste) ======
+// ====== VOLTAS: serviço por polling ======
 void serviceLapSensor(){
   int level = digitalRead(IR_PIN);
   unsigned long now = millis();
 
-  // espelho opcional no LED 13 para debug
-  // digitalWrite(13, level);
-
-  // borda + debounce
   if (level != lastLevel){
     if (now - lastEdgeMs >= DEBOUNCE_MS){
       lastEdgeMs = now;
-      // conta apenas quando entra no nível ativo e estiver armado
       if (level == irActiveLevel && armed){
         lapCount++;
+        // +5 no boost a cada volta (acúmulo)
+        boostAdd5();
+
         Serial.print(F("{\"evento\":\"lap\",\"voltas\":"));
         Serial.print(lapCount);
+        Serial.print(F(",\"voltasTotal\":"));
+        Serial.print(VOLTAS_TOTAL);
         Serial.println(F("}"));
-        armed = false; // one-shot
+
+        armed = false;
       }
     }
     lastLevel = level;
   }
 
-  // rearme quando liberar o feixe
   if (!armed && level == irIdleLevel){
     armed = true;
   }
@@ -240,26 +261,25 @@ void serviceLapSensor(){
 
 // ================== SETUP ==================
 void setup() {
-  // Ponte H
   pinMode(ENA, OUTPUT);
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
-  digitalWrite(IN1, HIGH);   // troque HIGH/LOW se inverter
+  digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
   analogWrite(ENA, 0);
 
-  // Seriais
   Serial.begin(BAUD_USB);
   BT.begin(BAUD_BT);
 
-  // Voltas
-  pinMode(13, OUTPUT); // opcional debug
+  pinMode(13, OUTPUT); // debug opcional
   initLapSensor();
 
-  lastCheckpointMs = millis();
   lastDecayMs = millis();
+  lastBoostTickMs = millis(); // inicia relógio do boost 20s
 
-  Serial.println(F("{\"status\":\"iniciando\",\"bt\":57600,\"usb\":115200}"));
+  Serial.print(F("{\"status\":\"iniciando\",\"bt\":57600,\"usb\":115200"));
+  Serial.print(F(",\"voltasTotal\":")); Serial.print(VOLTAS_TOTAL);
+  Serial.println(F("}"));
 }
 
 // ================== LOOP ==================
@@ -294,23 +314,34 @@ void loop() {
     sinal = 200;
   }
 
-  // Decaimento mesmo sem pacotes
+  // Decaimento
   updateAttentionDecay();
 
-  // BOOST
+  // BOOST janela ativa termina?
   if (boostAtivo && millis() >= boostFimMs) boostAtivo = false;
 
-  // CHECKPOINT
-  unsigned long now = millis();
-  if (!checkpointAtivo && (now - lastCheckpointMs >= CHECKPOINT_INTERVAL_MS)) {
+  // --------- BOOST ACUMULATIVO por tempo (a cada 20s) ---------
+  if (millis() - lastBoostTickMs >= BOOST_TICK_MS) {
+    lastBoostTickMs += BOOST_TICK_MS;
+    boostAdd5(); // +5 a cada 20s (até 100)
+  }
+  // ------------------------------------------------------------
+
+  // ---------- CHECKPOINT POR METADE DAS VOLTAS ----------
+  if (!checkpointDisparado && lapCount >= (VOLTAS_TOTAL / 2)) {
     checkpointAtivo = true;
-    Serial.println(F("checkpoint"));
+    checkpointDisparado = true;
+    Serial.print(F("{\"evento\":\"checkpoint\""));
+    Serial.print(F(",\"voltasTotal\":")); Serial.print(VOLTAS_TOTAL);
+    Serial.println(F("}"));
   }
   if (checkpointAtivo && relaxamento >= RELAX_OK) {
     checkpointAtivo = false;
-    lastCheckpointMs = now;
-    Serial.println(F("checkpoint_end"));
+    Serial.print(F("{\"evento\":\"checkpoint_end\""));
+    Serial.print(F(",\"voltasTotal\":")); Serial.print(VOLTAS_TOTAL);
+    Serial.println(F("}"));
   }
+  // ------------------------------------------------------
 
   // Voltas
   serviceLapSensor();
@@ -328,21 +359,22 @@ void loop() {
   }
   aplicarPWM(targetPWM);
 
- // Log enxuto a cada 500 ms
-static unsigned long lastDbg=0;
-if (now - lastDbg >= 500) {
-  lastDbg = now;
-  int attLog = checkpointAtivo ? 0 : atencao;
-  Serial.print(F("{\"link\":"));          Serial.print(linkAtivo()?"true":"false");
-  Serial.print(F(",\"conexao\":"));       Serial.print(sinal);
-  Serial.print(F(",\"lado\":\"policia\"")); // <-- corrigido
-  Serial.print(F(",\"concentracao\":"));  Serial.print(attLog);
-  Serial.print(F(",\"relaxamento\":"));   Serial.print(relaxamento);
-  Serial.print(F(",\"checkpoint\":"));    Serial.print(checkpointAtivo ? 1 : 0);
-  Serial.print(F(",\"boost\":"));         Serial.print(boostAtivo ? 1 : 0);
-  Serial.print(F(",\"pwm\":"));           Serial.print(targetPWM);
-  Serial.print(F(",\"voltas\":"));        Serial.print(lapCount);
-  Serial.println(F("}"));
-}
-
+  // Log enxuto a cada 500 ms
+  static unsigned long lastDbg=0;
+  unsigned long now = millis();
+  if (now - lastDbg >= 500) {
+    lastDbg = now;
+    int attLog = checkpointAtivo ? 0 : atencao;
+    Serial.print(F("{\"link\":"));          Serial.print(linkAtivo()?"true":"false");
+    Serial.print(F(",\"conexao\":"));       Serial.print(sinal);
+    Serial.print(F(",\"lado\":\"policia\""));
+    Serial.print(F(",\"concentracao\":"));  Serial.print(attLog);
+    Serial.print(F(",\"relaxamento\":"));   Serial.print(relaxamento);
+    Serial.print(F(",\"checkpoint\":"));    Serial.print(checkpointAtivo ? 1 : 0);
+    Serial.print(F(",\"boost\":"));         Serial.print((int)boostPct);   // 0..100 para o site
+    Serial.print(F(",\"pwm\":"));           Serial.print(targetPWM);
+    Serial.print(F(",\"voltas\":"));        Serial.print(lapCount);
+    Serial.print(F(",\"voltasTotal\":"));   Serial.print(VOLTAS_TOTAL);
+    Serial.println(F("}"));
+  }
 }

@@ -18,7 +18,7 @@
 
 
 #include <SoftwareSerial.h>
-SoftwareSerial BT(10,11); //Rx/Tx
+SoftwareSerial BT(5,6); //Rx/Tx
  
 void setup(){
   BT.begin(38400);
