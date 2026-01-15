@@ -1,70 +1,152 @@
-# Getting Started with Create React App
+<p align="center">
+  <img src="./public/logo-mindrace.png" alt="MindRace" width="300"/>
+</p>
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
-## Available Scripts
+### <p align="center"> Autorama controlado pela mente</p>
 
-In the project directory, you can run:
+<p align="center">
+  <strong>Velocidade é foco. Controle é calma. Vitória é domínio mental.</strong>
+</p>
 
-### `npm start`
+<p align="center">
+  <img src="./public/ProjetoEvento.jpeg" alt="MindRace" width="800"/>
+</p>
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+---
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+## 🎮 Visão Geral
 
-### `npm test`
+**MindRace** é um autorama competitivo onde os jogadores não usam controles físicos.  
+Eles usam **ondas cerebrais**.
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+Cada jogador controla um carrinho em tempo real através de um **NeuroSky**, transformando estados mentais em ações diretas na pista.
 
-### `npm run build`
+---
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## 🧠 Mapeamento Mental → Ações
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+| Estado Mental | Ação |
+|--------------|------|
+| 🧠 Concentração | Controla a **velocidade** do carrinho (PWM) |
+| 😌 Relaxamento | Libera o **checkpoint** no meio da corrida |
+| 👁️👁️👁️ 3 piscadas | Ativa um **boost rápido** |
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+### Checkpoint  
+No meio da pista, o carrinho **para automaticamente**.  
+O jogador precisa **relaxar até um nível mínimo** para continuar correndo.
 
-### `npm run eject`
+---
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+## 🏁 Mecânica da Competição
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+- 2 jogadores simultâneos  
+- 1 pista por jogador  
+- Contagem automática de voltas  
+- Ranking com os **10 melhores tempos do evento**  
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+📌 O ranking é salvo **localmente**, sem internet.
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+> Decisão técnica: evitar qualquer dependência online para reduzir ruído e instabilidade em ambiente de evento tech.
 
-## Learn More
+---
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+## 🔌 Arquitetura Eletrônica
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+### Componentes Utilizados
 
-### Code Splitting
+- 2 × Arduino Uno  
+- 2 × Módulos Bluetooth  
+- 2 × Sensores IR (contagem de voltas)  
+- 1 × Ponte H (controle dos motores via PWM)  
+- 1 × Step Down (12V → 5V)  
+- 1 × Chave liga/desliga  
+- 1 × Entrada de alimentação 12V  
+- LEDs endereçáveis (feedback visual da corrida)
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+### Organização do Hardware
 
-### Analyzing the Bundle Size
+- 🛣️ **1 Arduino por pista**
+- 📡 **1 módulo Bluetooth por Arduino**
+- 🧠 **1 NeuroSky por jogador**
+- ⚙️ Ponte H controla a velocidade dos carrinhos
+- 🔢 Sensores IR fazem a contagem de voltas
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+---
 
-### Making a Progressive Web App
+## 🧩 Arquitetura do Sistema
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+NeuroSky
+↓ (Bluetooth)
+Arduino (Pista)
+↓ PWM
+Ponte H → Motor do carrinho
+↓
+Sensores IR → Contagem de voltas
+↓
+Site React (Feedback visual + Ranking)
 
-### Advanced Configuration
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+---
 
-### Deployment
+## 💻 Interface Web (React)
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+Foi desenvolvido um site em **React** para feedback visual em tempo real, exibindo:
 
-### `npm run build` fails to minify
+- 📊 Nível de **concentração**
+- 😌 Nível de **relaxamento** (durante o checkpoint)
+- ⚡ Barra de **boost** (cheia → vazia após uso)
+- 🏆 Ranking Top 10 do evento
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+### Armazenamento
+
+- `localStorage`
+- Sem backend
+- Sem APIs externas
+
+Simples, confiável e estável para uso offline em eventos.
+
+---
+
+## 🎨 Identidade Visual
+
+Inspirada em estética **cyber / futurista**:
+
+- Neon azul e amarelo  
+- Alto contraste  
+- Luz como feedback cognitivo  
+- Cérebro como símbolo central  
+
+Elementos principais:
+- Pista iluminada com LEDs
+- Interface com efeitos de glow
+- Branding focado em velocidade + mente
+
+---
+
+## 🧪 Tecnologias Utilizadas
+
+- Arduino (C/C++)
+- Bluetooth Serial
+- NeuroSky MindWave
+- React
+- HTML, CSS, JavaScript
+- PWM e eletrônica embarcada
+- LEDs endereçáveis
+
+---
+
+## 🧠 Conceito Central
+
+> Não vence quem acelera mais.  
+> Vence quem controla melhor a própria mente.
+
+O **MindRace** demonstra, na prática, a integração entre **neurotecnologia**, **hardware** e **experiência interativa**.
+
+---
+
+## 📸 Demonstração
+
+<p align="center">
+  <img src="./public/ProjetoEvento.gif" width="900" />
+</p>
