@@ -314,3 +314,79 @@
   animation: blinkPulseFast 180ms ease-in-out;
   filter: drop-shadow(0 0 6px rgba(255,255,255,.55));
 }
+
+/* ========================================================= */
+/* ===== Modal LOCAL por painel (checkpoint/relaxamento) ==== */
+/* cobre SOMENTE o card do painel em checkpoint              */
+/* ========================================================= */
+
+/* garante contexto de posicionamento no card */
+.panel { position: relative; }
+
+/* overlay só dentro do painel */
+.side-modal{
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3,10,16,0.45);
+  backdrop-filter: blur(2px);
+  pointer-events: auto; /* captura cliques só neste lado */
+  border-radius: 14px;
+}
+
+.side-modal-box{
+  width: min(420px, 92%);
+  background: rgba(15,23,42,0.96);
+  color: #e5f4ff;
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 18px 48px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,0.06);
+}
+
+/* blur suave apenas no conteúdo do painel afetado */
+.panel .panel-inner.blurred{
+  filter: blur(3px) brightness(.95);
+}
+
+/* em telas estreitas o box ocupa mais largura */
+@media (max-width: 860px){
+  .side-modal-box{ width: min(520px, 96%); }
+}
+
+/* Permitir que o modal lateral “escape” do cartão */
+.panel {
+  overflow: visible; /* antes ficava clipping */
+}
+
+/* Modal lateral por painel (independente; ambos podem abrir) */
+.side-modal {
+  position: absolute;     /* relativo ao .panel .panel-inner */
+  inset: 0;
+  display: flex;
+  align-items: center;
+  z-index: 20;            /* acima do conteúdo do painel */
+  pointer-events: none;   /* não bloqueia o outro lado */
+}
+
+/* Alinhamento por lado */
+.panel-left  .side-modal { justify-content: flex-start; padding-left: 12px; }
+.panel-right .side-modal { justify-content: flex-end;   padding-right: 12px; }
+
+/* Caixa do modal lateral */
+.side-modal-box {
+  pointer-events: auto;   /* permite clicar dentro da caixa */
+  width: min(360px, 92%);
+  background: rgba(15,23,42,0.96);
+  color: #e5f4ff;
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.06);
+}
+
+/* Se quiser reforçar o desfoque do painel em checkpoint */
+.panel-inner.blurred {
+  filter: blur(2px);
+}

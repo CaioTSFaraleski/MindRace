@@ -5,6 +5,9 @@
 
 #include <SoftwareSerial.h>
 
+// ================== IDENTIFICAÇÃO DO LADO ==================
+const char* LADO = "taxi";
+
 // ================== BLUETOOTH / THINKGEAR ==================
 #define BT_RX 5
 #define BT_TX 6
@@ -20,7 +23,7 @@ const int IN1 = 3;   // direção
 const int IN2 = 4;   // direção
 
 // ================== PWM LIMITES ==================
-const int MIN_PWM = 50;
+const int MIN_PWM = 55;
 const int MAX_PWM = 80;
 const int BOOST_PWM = (int)min((long)(MAX_PWM * 12L / 10L), 255L); // ~+20%
 
@@ -51,7 +54,7 @@ const int   THRESHOLD   = 600;
 const int   REFRACT_MS  = 250;
 const int   BASE_WIN    = 64;
 const int   MIN_PEAK_MS = 15;
-const int   BLINK_MIN   = 50;
+const int   BLINK_MIN   = 130;
 const int   BLINK_MAX   = 300;
 
 long lastBlinkRawMs = -10000;
@@ -76,10 +79,10 @@ int atencaoSuave = 0;    // 0..100
 unsigned long lastByteMs    = 0;
 unsigned long lastSignalMs  = 0;
 unsigned long lastDecayMs   = 0;
-bool linkAtivo() { return (millis() - lastByteMs) < 1500; }
+bool linkAtivo() { return (millis() - lastByteMs) < 900; }
 
 // ================== CHECKPOINT (metade das voltas) ==================
-const int RELAX_OK = 60;
+const int RELAX_OK = 70;
 bool checkpointAtivo = false;
 bool checkpointDisparado = false; // dispara uma vez por corrida
 
@@ -118,6 +121,7 @@ void onValidBlink(int strength) {
 
   Serial.print(F("{\"evento\":\"blink\",\"forca\":"));
   Serial.print(strength);
+  Serial.print(F(",\"lado\":\"")); Serial.print(LADO); Serial.print(F("\""));
   Serial.print(F(",\"voltasTotal\":")); Serial.print(VOLTAS_TOTAL);
   Serial.println(F("}"));
 
@@ -134,6 +138,7 @@ void onValidBlink(int strength) {
       boostFimMs = now + BOOST_MS;
       boostPct = 0; // consome o boost
       Serial.print(F("{\"evento\":\"boost\""));
+      Serial.print(F(",\"lado\":\"")); Serial.print(LADO); Serial.print(F("\""));
       Serial.print(F(",\"voltasTotal\":")); Serial.print(VOLTAS_TOTAL);
       Serial.println(F("}"));
     }
@@ -161,8 +166,8 @@ void processRawSample(int raw) {
 }
 
 // ====== Decaimento da ATENÇÃO ======
-#define DECAY_PER_SEC 20
-#define DECAY_TICK_MS 100
+#define DECAY_PER_SEC 60
+#define DECAY_TICK_MS 60
 void updateAttentionDecay() {
   unsigned long now = millis();
   if (atencaoSuave < 0) atencaoSuave = max(0, atencao);
@@ -244,6 +249,7 @@ void serviceLapSensor(){
 
         Serial.print(F("{\"evento\":\"lap\",\"voltas\":"));
         Serial.print(lapCount);
+        Serial.print(F(",\"lado\":\"")); Serial.print(LADO); Serial.print(F("\""));
         Serial.print(F(",\"voltasTotal\":"));
         Serial.print(VOLTAS_TOTAL);
         Serial.println(F("}"));
@@ -278,6 +284,7 @@ void setup() {
   lastBoostTickMs = millis(); // inicia relógio do boost 20s
 
   Serial.print(F("{\"status\":\"iniciando\",\"bt\":57600,\"usb\":115200"));
+  Serial.print(F(",\"lado\":\"")); Serial.print(LADO); Serial.print(F("\""));
   Serial.print(F(",\"voltasTotal\":")); Serial.print(VOLTAS_TOTAL);
   Serial.println(F("}"));
 }
@@ -310,7 +317,7 @@ void loop() {
   }
 
   // Sem contato se >2s sem 0x02 ou link caiu
-  if ((millis() - lastSignalMs) > 2000 || !linkAtivo()) {
+  if ((millis() - lastSignalMs) > 1000 || !linkAtivo()) {
     sinal = 200;
   }
 
@@ -332,12 +339,14 @@ void loop() {
     checkpointAtivo = true;
     checkpointDisparado = true;
     Serial.print(F("{\"evento\":\"checkpoint\""));
+    Serial.print(F(",\"lado\":\"")); Serial.print(LADO); Serial.print(F("\""));
     Serial.print(F(",\"voltasTotal\":")); Serial.print(VOLTAS_TOTAL);
     Serial.println(F("}"));
   }
   if (checkpointAtivo && relaxamento >= RELAX_OK) {
     checkpointAtivo = false;
     Serial.print(F("{\"evento\":\"checkpoint_end\""));
+    Serial.print(F(",\"lado\":\"")); Serial.print(LADO); Serial.print(F("\""));
     Serial.print(F(",\"voltasTotal\":")); Serial.print(VOLTAS_TOTAL);
     Serial.println(F("}"));
   }
@@ -367,7 +376,7 @@ void loop() {
     int attLog = checkpointAtivo ? 0 : atencao;
     Serial.print(F("{\"link\":"));          Serial.print(linkAtivo()?"true":"false");
     Serial.print(F(",\"conexao\":"));       Serial.print(sinal);
-    Serial.print(F(",\"lado\":\"policia\""));
+    Serial.print(F(",\"lado\":\"taxi\""));
     Serial.print(F(",\"concentracao\":"));  Serial.print(attLog);
     Serial.print(F(",\"relaxamento\":"));   Serial.print(relaxamento);
     Serial.print(F(",\"checkpoint\":"));    Serial.print(checkpointAtivo ? 1 : 0);

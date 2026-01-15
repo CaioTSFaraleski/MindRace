@@ -87,7 +87,7 @@ export default function TelaCorrida({ onBack, corrida }) {
 
   // ---- Blink feedback (olho piscando) ----
   const [blinkState, setBlinkState] = useState({ policia: 0, taxi: 0 });
-  const BLINK_HOLD_MS = 220; // animação rápida ~180ms + margem
+  const BLINK_HOLD_MS = 220;
 
   const isBlinking = useCallback((lado) => {
     const t = blinkState[lado] || 0;
@@ -95,7 +95,6 @@ export default function TelaCorrida({ onBack, corrida }) {
   }, [blinkState]);
 
   const eyeWrapStyle = { position: "absolute", top: 8, right: 10, opacity: 0.95 };
-  // ----------------------------------------
 
   useEffect(() => {
     connectedOnceRef.current = { policia: false, taxi: false };
@@ -138,18 +137,39 @@ export default function TelaCorrida({ onBack, corrida }) {
     setRunning(false);
   }, [running]);
 
-  // NÃO inicia mais automaticamente. Apenas marca "conectado".
+  // === enviar para TODAS as portas já abertas ===
+  const sendAll = useCallback(async (text) => {
+    await Promise.all(
+      connsRef.current.map(async (c) => {
+        try {
+          if (c?.port?.writable) {
+            const writer = c.port.writable.getWriter();
+            const data = new TextEncoder().encode(text);
+            await writer.write(data);
+            writer.releaseLock();
+          }
+        } catch {}
+      })
+    );
+  }, []);
+
+  // === Enviar R1 MAIÚSCULO ao iniciar corrida (modal) ===
+  const sendR1All = useCallback(async () => {
+    await sendAll("R1\n");
+  }, [sendAll]);
+
+  // NÃO inicia automaticamente. Apenas marca "conectado".
   const markConnected = useCallback((lado, conexaoVal) => {
     const ok = Number.isFinite(conexaoVal) && conexaoVal >= 0 && conexaoVal < 200;
     if (ok && !connectedOnceRef.current[lado]) {
       connectedOnceRef.current[lado] = true;
       setConn((c) => ({ ...c, [lado]: "conectado" }));
-      // sem auto-start aqui
     }
   }, []);
 
-  // ==== applyPlayer: usa voltasTotal do Arduino (quando vier) ====
+  // ====== AQUI é a ÚNICA mudança solicitada: checkpoint controla modal ======
   const applyPlayer = useCallback((lado, data) => {
+    // conexão
     setConnQual(prev => {
       const prevQ = prev[lado];
       const n = Number(data?.conexao);
@@ -159,6 +179,7 @@ export default function TelaCorrida({ onBack, corrida }) {
       return { ...prev, [lado]: q };
     });
 
+    // relaxamento
     setRelax(prev => {
       const prevR = prev[lado];
       const n = Number(data?.relaxamento);
@@ -167,6 +188,11 @@ export default function TelaCorrida({ onBack, corrida }) {
       return { ...prev, [lado]: r };
     });
 
+    // >>> controle do modal: SOMENTE pelo Arduino
+    const cpFlag = Number(data?.checkpoint) === 1;
+    setRelaxModal(m => ({ ...m, [lado]: cpFlag }));
+
+    // jogador
     const setPlayer = lado === "policia" ? setPolicia : setTaxi;
     setPlayer(prev => {
       const nT = Number(data?.voltasTotal);
@@ -184,34 +210,31 @@ export default function TelaCorrida({ onBack, corrida }) {
       const vtRaw = Number.isFinite(nV) ? nV : prev.voltas;
       const laps  = Math.min(totalFromArduino, Math.max(0, vtRaw));
 
-      const rlSnapshot =
-        lado === "policia"
-          ? (Number.isFinite(relax.policia) ? relax.policia : 0)
-          : (Number.isFinite(relax.taxi) ? relax.taxi : 0);
-
-      const needRelaxModal = (laps >= 5 && cx <= 0 && rlSnapshot < 50);
-      setRelaxModal(m => ({ ...m, [lado]: needRelaxModal }));
-
       const finishedNow = prev.tempoFinalMs == null && laps >= totalFromArduino && running;
 
       return {
         ...prev,
         concentracao: cx,
         boost: bs,
-        voltas: needRelaxModal ? Math.min(prev.voltas, laps) : laps,
+        voltas: laps,                 // sem heurística extra aqui
         voltasTotal: totalFromArduino,
         tempoFinalMs: finishedNow ? timerMs : prev.tempoFinalMs,
       };
     });
-  }, [running, timerMs, relax, markConnected]);
-  // ====================================
+
+    // blink
+    if (data?.evento === "blink") {
+      setBlinkState(prev => ({ ...prev, [lado]: performance.now() }));
+    }
+  }, [running, timerMs, markConnected]);
+  // ==========================================================================
 
   const parseLine = useCallback(
     (line, sideFallback) => {
       try {
         const obj = JSON.parse(line.trim());
 
-        // 1) Evento de blink vindo do Arduino
+        // evento de blink
         if (obj && obj.evento === "blink") {
           const ladoBlink = obj.lado ? String(obj.lado).toLowerCase() : sideFallback;
           if (ladoBlink === "policia" || ladoBlink === "taxi") {
@@ -220,7 +243,7 @@ export default function TelaCorrida({ onBack, corrida }) {
           return;
         }
 
-        // 2) Atualização normal de estado por lado
+        // atualização normal
         const lado = obj.lado ? String(obj.lado).toLowerCase() : sideFallback;
         if (lado === "policia" || lado === "taxi") {
           applyPlayer(lado, obj);
@@ -250,7 +273,6 @@ export default function TelaCorrida({ onBack, corrida }) {
                 const line = connObj.buffer.slice(0, idx);
                 connObj.buffer = connObj.buffer.slice(idx + 1);
 
-                // Tenta parse direto (pode ser evento de blink)
                 try {
                   const obj = JSON.parse(line.trim());
 
@@ -271,7 +293,6 @@ export default function TelaCorrida({ onBack, corrida }) {
                   }
                 } catch {}
 
-                // Se não deu parse ou não tinha 'lado', usa fallback
                 if (connObj.side === "policia" || connObj.side === "taxi") {
                   parseLine(line, connObj.side);
                 }
@@ -385,25 +406,52 @@ export default function TelaCorrida({ onBack, corrida }) {
     }
   };
 
-  const goBack = () => {
-    const arr = loadRanking();
-    const saveIf = (lado, tempoMs) => {
-      if (typeof tempoMs !== "number") return;
-      const j = corrida?.jogadores?.find(x => x.papel === lado);
-      arr.push({
-        telefone: j?.telefone || "",
-        nome: j ? `${j.nome ?? ""} ${j.sobrenome ?? ""}`.trim() : "",
-        papel: lado,
-        tempoMs,
-        data: Date.now(),
-      });
-    };
-    saveIf("policia", policia.tempoFinalMs);
-    saveIf("taxi", taxi.tempoFinalMs);
-    saveRanking(arr);
-    if (typeof onBack === "function") onBack();
-    else window.location.reload();
+  // SUBSTITUA APENAS a função goBack por esta
+const goBack = () => {
+  const arr = loadRanking();
+
+  // Regra: só rankeia se NÃO marcou "não participar"
+  // e se tiver nome E número (telefone/numero) preenchidos.
+  const shouldRank = (j) => {
+    if (!j) return false;
+    const optOut =
+      j.noRanking === true ||            // possível nome do checkbox
+      j.naoParticipaRanking === true ||  // possível variação
+      j.participaRanking === false;      // possível inverso
+
+    const nome = `${j.nome ?? ""} ${j.sobrenome ?? ""}`.trim();
+    const numero = j.telefone ?? j.numero ?? ""; // aceita 'telefone' ou 'numero'
+    const temIdentificacao = nome.length > 0 && numero.length > 0;
+
+    return !optOut && temIdentificacao;
   };
+
+  const pushIf = (lado, tempoMs) => {
+    if (typeof tempoMs !== "number") return;
+    const j = corrida?.jogadores?.find(x => x.papel === lado);
+    if (!shouldRank(j)) return;
+
+    const numero = j.telefone ?? j.numero ?? "";
+    const nome = `${j.nome ?? ""} ${j.sobrenome ?? ""}`.trim();
+
+    arr.push({
+      telefone: numero,
+      nome,
+      papel: lado,
+      tempoMs,
+      data: Date.now(),
+    });
+  };
+
+  pushIf("policia", policia.tempoFinalMs);
+  pushIf("taxi", taxi.tempoFinalMs);
+
+  saveRanking(arr);
+
+  if (typeof onBack === "function") onBack();
+  else window.location.reload();
+};
+
 
   const needPairing = connsRef.current.length < 2;
 
@@ -411,8 +459,9 @@ export default function TelaCorrida({ onBack, corrida }) {
   const connectedCount =
     (conn.policia === "conectado" ? 1 : 0) + (conn.taxi === "conectado" ? 1 : 0);
 
-  const beginRaceFromModal = () => {
+  const beginRaceFromModal = async () => {
     if (connectedCount >= 1) {
+      await sendR1All();
       setConnectModalOpen(false);
       startTimer();
     }
@@ -548,8 +597,20 @@ export default function TelaCorrida({ onBack, corrida }) {
             <div className="modal-body">
               <p>Status:</p>
               <ul>
-                <li>Polícia: <b className={statusClass(conn.policia)}>{conn.policia}</b></li>
-                <li>Táxi: <b className={statusClass(conn.taxi)}>{conn.taxi}</b></li>
+                <li style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                  <span>Polícia: <b className={statusClass(conn.policia)}>{conn.policia}</b></span>
+                  <span style={{display:"flex",alignItems:"center",gap:10}}>
+                    <WifiIcon q={connQual.policia} />
+                    <EyeIcon active={isBlinking("policia")} className="eye" />
+                  </span>
+                </li>
+                <li style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                  <span>Táxi: <b className={statusClass(conn.taxi)}>{conn.taxi}</b></span>
+                  <span style={{display:"flex",alignItems:"center",gap:10}}>
+                    <WifiIcon q={connQual.taxi} />
+                    <EyeIcon active={isBlinking("taxi")} className="eye" />
+                  </span>
+                </li>
               </ul>
 
               <p>Conectados: <b>{(conn.policia === "conectado" ? 1 : 0) + (conn.taxi === "conectado" ? 1 : 0)}</b> (pode iniciar com 1 ou 2 conectados)</p>
@@ -562,7 +623,7 @@ export default function TelaCorrida({ onBack, corrida }) {
                     <button className="btn" onClick={onBack}>Cancelar</button>
                     <button
                       className="btn btn-primary"
-                      onClick={() => { setConnectModalOpen(false); startTimer(); }}
+                      onClick={beginRaceFromModal}
                       disabled={((conn.policia === "conectado" ? 1 : 0) + (conn.taxi === "conectado" ? 1 : 0)) < 1}
                       title={((conn.policia === "conectado" ? 1 : 0) + (conn.taxi === "conectado" ? 1 : 0)) < 1 ? "Conecte pelo menos 1 dispositivo" : "Iniciar corrida"}
                     >
@@ -577,7 +638,7 @@ export default function TelaCorrida({ onBack, corrida }) {
                     <button className="btn" onClick={onBack}>Cancelar</button>
                     <button
                       className="btn btn-primary"
-                      onClick={() => { setConnectModalOpen(false); startTimer(); }}
+                      onClick={beginRaceFromModal}
                       disabled={((conn.policia === "conectado" ? 1 : 0) + (conn.taxi === "conectado" ? 1 : 0)) < 1}
                       title={((conn.policia === "conectado" ? 1 : 0) + (conn.taxi === "conectado" ? 1 : 0)) < 1 ? "Conecte pelo menos 1 dispositivo" : "Iniciar corrida"}
                     >
